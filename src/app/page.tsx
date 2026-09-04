@@ -1,9 +1,16 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
+import { useConnectedWallet, useConnect, useDisconnect, useWalletStatus, useWallets } from "@solana/kit-plugin-wallet/react";
 import { RENT_PHASES } from "@/lib/rent-phases";
 import { buildScanViewModel } from "@/lib/solana/scan-display";
-import { RentBackApiResult } from "@/lib/solana/scan";
+import { walletClient } from "@/lib/solana/wallet-client";
+import {
+  getWalletOwnershipState,
+  shouldShowUseConnectedWalletAction,
+  type WalletOwnershipContext,
+} from "@/lib/solana/wallet-ownership";
+import { type RentBackApiResult } from "@/lib/solana/scan";
 
 type ScanResponse = RentBackApiResult | { error: string };
 type WalletScanResponse = RentBackApiResult;
@@ -28,6 +35,20 @@ function formatProgramSummary(programCounts: Record<string, number>): string {
     .join(" · ");
 }
 
+function getReclaimContext(result: WalletScanResponse | null, connectedWalletAddress: string | null): WalletOwnershipContext {
+  return {
+    scanResult: result
+      ? {
+          scannedWallet: result.scannedWallet,
+          totals: {
+            claimableNowLamports: result.totals.claimableNowLamports,
+          },
+        }
+      : null,
+    connectedWalletAddress,
+  };
+}
+
 export default function HomePage() {
   const [walletAddress, setWalletAddress] = useState("");
   const [isScanning, setIsScanning] = useState(false);
@@ -35,6 +56,23 @@ export default function HomePage() {
   const [result, setResult] = useState<WalletScanResponse | null>(null);
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const [showAllAccounts, setShowAllAccounts] = useState(false);
+  const [walletPickerOpen, setWalletPickerOpen] = useState(false);
+
+  const connectedWallet = useConnectedWallet(walletClient);
+  const wallets = useWallets(walletClient);
+  const walletStatus = useWalletStatus(walletClient);
+  const { dispatch: connectWallet, isRunning: isConnecting } = useConnect(walletClient);
+  const { dispatch: disconnectWallet, isRunning: isDisconnecting } = useDisconnect(walletClient);
+  const connectedWalletAddress = connectedWallet?.account.address ?? null;
+
+  const isWalletActioning = isConnecting || isDisconnecting;
+  const isWalletReadinessPending = walletStatus === "pending" || walletStatus === "reconnecting";
+
+  const reclaimContext = useMemo(
+    () => getReclaimContext(result, connectedWalletAddress),
+    [connectedWalletAddress, result],
+  );
+  const walletState = getWalletOwnershipState(reclaimContext);
 
   const viewModel = useMemo(() => (result ? buildScanViewModel(result) : null), [result]);
   const eligibleAccounts = useMemo(() => viewModel?.accountRows.filter((account) => account.isClaimEligible) ?? [], [viewModel]);
@@ -53,6 +91,12 @@ export default function HomePage() {
   const eligibleCount = viewModel?.totals.claimableAccounts ?? 0;
   const programSummary = viewModel ? formatProgramSummary(viewModel.claimableProgramCounts) : "";
   const showTechnicalSummary = hasScanned && viewModel !== null;
+
+  const shouldShowUseConnectedWallet = shouldShowUseConnectedWalletAction(walletAddress, connectedWalletAddress);
+  const showWalletPicker = walletPickerOpen;
+
+  const hasClaimableResult = result?.totals.claimableNowLamports !== "0";
+
   const educationalSection = (
     <section className="mx-auto w-full max-w-3xl rounded-2xl border border-rent-border bg-rent-panel/90 p-5 shadow-panel">
       <h2 className="text-xl font-semibold text-white">Why is there SOL to reclaim?</h2>
@@ -89,17 +133,180 @@ export default function HomePage() {
     </section>
   );
 
+  const walletStatusPanel = (
+    <section className="mx-auto w-full max-w-3xl rounded-2xl border border-rent-border bg-rent-panel/90 p-5 shadow-panel">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h2 className="text-lg font-semibold text-white">Wallet connection</h2>
+        <p className="text-xs text-slate-400">
+          {connectedWalletAddress ? `Connected: ${shortenAddress(connectedWalletAddress)}` : "No wallet connected"}
+        </p>
+      </div>
+
+      {!connectedWalletAddress && !isWalletReadinessPending ? (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setWalletPickerOpen((open) => !open)}
+            disabled={isWalletActioning}
+            className="rounded-lg border border-rent-border bg-rent-bg/70 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-rent-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Connect wallet
+          </button>
+          <p className="mt-2 text-sm text-slate-300">Choose a wallet from Wallet Standard discovery.</p>
+        </div>
+      ) : null}
+
+      {connectedWalletAddress ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await disconnectWallet();
+              } catch {
+                setError("Unable to disconnect wallet.");
+              }
+            }}
+            disabled={isWalletActioning}
+            className="rounded-lg border border-rent-border px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-rent-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Disconnect wallet
+          </button>
+          <button
+            type="button"
+            onClick={() => setWalletPickerOpen((open) => !open)}
+            disabled={isWalletActioning}
+            className="rounded-lg border border-rent-border px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-rent-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {walletPickerOpen ? "Hide wallets" : "Switch wallet"}
+          </button>
+        </div>
+      ) : null}
+
+      {isWalletReadinessPending ? (
+        <p className="mt-3 text-sm text-slate-400">Checking wallet availability...</p>
+      ) : null}
+
+      {showWalletPicker ? (
+        wallets.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-400">No Wallet Standard wallets were discovered.</p>
+        ) : (
+          <div className="mt-3">
+            {wallets.length === 1 ? (
+              <p className="mb-2 text-xs uppercase tracking-[0.15em] text-slate-400">
+                {wallets.length} compatible wallet detected
+              </p>
+            ) : (
+              <p className="mb-2 text-xs uppercase tracking-[0.15em] text-slate-400">
+                {wallets.length} compatible wallets detected
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+            {wallets.map((wallet, index) => (
+              <button
+                key={`${wallet.name}-${index}`}
+                type="button"
+                disabled={isWalletActioning}
+                onClick={() => {
+                  void handleConnectWallet(wallet);
+                  setWalletPickerOpen(false);
+                }}
+                className="rounded-lg border border-rent-border px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-rent-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {wallet.name}
+              </button>
+            ))}
+            </div>
+          </div>
+        )
+      ) : null}
+
+      {walletState.state === "disconnected" && hasClaimableResult ? (
+        <div className="mt-4 rounded-xl border border-rent-border bg-rent-bg/70 p-3">
+          <p className="text-sm text-slate-200">
+            {claimableNow} available to reclaim.
+          </p>
+          <p className="mt-1 text-xs text-slate-400">Connect the scanned wallet to prepare the reclaim.</p>
+        </div>
+      ) : null}
+
+      {walletState.state === "matching" ? (
+        <div className="mt-4 rounded-xl border border-rent-border bg-rent-bg/70 p-3">
+          <p className="text-sm text-slate-200">{claimableNow} ready to reclaim.</p>
+          <p className="mt-1 text-xs text-rent-accent">Wallet connected to scanned address.</p>
+          <button
+            type="button"
+            disabled
+            className="mt-3 rounded-lg border border-rent-accent/70 px-3 py-2 text-sm font-semibold text-rent-accent"
+          >
+            Reclaim {claimableNow}
+          </button>
+          <p className="mt-1 text-[11px] text-slate-400">Reclaim flow is prepared for a later milestone.</p>
+        </div>
+      ) : null}
+
+      {walletState.state === "mismatched" ? (
+        <div className="mt-4 rounded-xl border border-rent-border bg-rent-bg/70 p-3">
+          <p className="text-sm text-white">This is not the wallet you scanned.</p>
+          <p className="mt-2 text-xs text-slate-300">Scanned: {shortenAddress(result?.scannedWallet ?? "")}</p>
+          <p className="text-xs text-slate-300">Connected: {shortenAddress(connectedWalletAddress ?? "")}</p>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                if (connectedWallet) {
+                  await disconnectWallet();
+                }
+                setWalletPickerOpen(true);
+              } catch {
+                setError("Unable to switch wallet.");
+              }
+            }}
+            disabled={isWalletActioning}
+            className="mt-3 rounded-lg border border-rent-accent/80 px-3 py-2 text-sm font-semibold text-rent-accent transition hover:border-rent-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Connect scanned wallet
+          </button>
+        </div>
+      ) : null}
+
+      {walletState.state === "no-claimable" ? (
+        <div className="mt-4 rounded-xl border border-rent-border bg-rent-bg/70 p-3">
+          <p className="text-sm text-slate-200">No excess SOL currently available to reclaim.</p>
+        </div>
+      ) : null}
+    </section>
+  );
+
+  async function handleConnectWallet(selectedWallet: Parameters<typeof connectWallet>[0]) {
+    try {
+      await connectWallet(selectedWallet);
+      setWalletPickerOpen(false);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to connect wallet.");
+    }
+  }
+
+  function handleUseConnectedWallet() {
+    if (!connectedWalletAddress) {
+      return;
+    }
+    setWalletAddress(connectedWalletAddress);
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!walletAddress.trim() || isScanning) {
       return;
     }
 
+    const walletToScan = walletAddress.trim();
     setIsScanning(true);
     setError(null);
     setShowTechnicalDetails(false);
     setShowAllAccounts(false);
-    setResult(null);
+    setWalletPickerOpen(false);
 
     try {
       const response = await fetch("/api/scan", {
@@ -107,7 +314,7 @@ export default function HomePage() {
         headers: {
           "content-type": "application/json",
         },
-        body: JSON.stringify({ walletAddress: walletAddress.trim() }),
+        body: JSON.stringify({ walletAddress: walletToScan }),
       });
 
       const payload = (await response.json()) as ScanResponse;
@@ -115,7 +322,11 @@ export default function HomePage() {
         throw new Error((payload as { error: string }).error ?? "Scan failed.");
       }
 
-      setResult(payload as WalletScanResponse);
+      const scanPayload = payload as WalletScanResponse;
+      setResult(scanPayload);
+      setWalletAddress(walletToScan);
+      setError(null);
+      setWalletPickerOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unexpected error while scanning.");
     } finally {
@@ -138,22 +349,31 @@ export default function HomePage() {
           <p className="mt-3 text-base leading-relaxed text-slate-300 md:text-lg">
             See how much SOL your wallet can reclaim from token accounts.
           </p>
-          <p className="mt-2 text-sm text-slate-400">
-            No wallet connection required. No tokens moved. No accounts closed.
-          </p>
+          <p className="mt-2 text-sm text-slate-400">No wallet connection required for scan. No tokens moved. No accounts closed.</p>
         </header>
 
         <form
-          className="mx-auto flex w-full max-w-3xl flex-col gap-3 rounded-2xl border border-rent-border bg-rent-panel/60 px-4 py-4 shadow-panel md:flex-row md:items-center"
+          className="mx-auto flex w-full max-w-3xl flex-col gap-3 rounded-2xl border border-rent-border bg-rent-panel/60 px-4 py-4 shadow-panel"
           onSubmit={handleSubmit}
         >
-          <input
-            className="rent-input flex-1 rounded-xl px-4 py-3 text-base outline-none placeholder:text-slate-400"
-            value={walletAddress}
-            onChange={(event) => setWalletAddress(event.target.value)}
-            placeholder="Enter Solana wallet address"
-            aria-label="Wallet address"
-          />
+          <div className="flex flex-1 flex-col gap-2 md:gap-3">
+            <input
+              className="rent-input flex-1 rounded-xl px-4 py-3 text-base outline-none placeholder:text-slate-400"
+              value={walletAddress}
+              onChange={(event) => setWalletAddress(event.target.value)}
+              placeholder="Enter Solana wallet address"
+              aria-label="Wallet address"
+            />
+            {shouldShowUseConnectedWallet ? (
+              <button
+                type="button"
+                className="self-start text-sm text-rent-accent underline decoration-dotted underline-offset-4"
+                onClick={handleUseConnectedWallet}
+              >
+                Use connected wallet
+              </button>
+            ) : null}
+          </div>
           <button
             type="submit"
             disabled={isScanning}
@@ -171,13 +391,14 @@ export default function HomePage() {
 
         {!hasScanned ? (
           <>
-            {educationalSection}
             <section className="mx-auto w-full max-w-3xl rounded-2xl border border-rent-border bg-rent-panel/90 p-5 shadow-panel">
               <p className="text-sm text-slate-300">
                 Paste a wallet and click <span className="font-semibold text-white">Check wallet</span> to calculate reclaimable SOL from all
                 SPL Token and Token-2022 accounts.
               </p>
             </section>
+            {walletStatusPanel}
+            {educationalSection}
           </>
         ) : (
           <>
@@ -203,6 +424,8 @@ export default function HomePage() {
                 </article>
               </div>
             </section>
+
+            {walletStatusPanel}
             {educationalSection}
 
             <section className="mx-auto w-full max-w-3xl rounded-2xl border border-rent-border bg-rent-panel/90 p-5 shadow-panel">
@@ -302,11 +525,11 @@ export default function HomePage() {
           <ul className="mt-3 space-y-2 text-sm text-slate-300">
             <li>✓ Tokens stay in your wallet</li>
             <li>✓ Token accounts stay open</li>
-            <li>✓ Only excess SOL is withdrawn</li>
+            <li>✓ Only excess SOL will be reclaimed</li>
             <li>✓ RentBack takes 0% reclaim fee</li>
           </ul>
           <p className="mt-3 text-xs text-slate-500">
-            The reclaim transaction flow is intentionally not implemented in this version.
+            Reclaim transactions are not available in this milestone. Wallet connection only prepares eligibility checks.
           </p>
         </section>
 
@@ -317,11 +540,14 @@ export default function HomePage() {
           </p>
           <p className="mt-2 text-sm text-slate-300">Free to scan. 0% reclaim fee. Open source.</p>
           <div className="mt-4 flex flex-wrap gap-3 text-sm">
-            <a className="rounded-lg border border-rent-border px-3 py-2 text-slate-200" href="https://x.com/LoicDlugosz" aria-label="X">
+            <a className="rounded-lg border border-rent-border px-3 py-2 text-slate-200" href="#" aria-label="X placeholder">
               X
             </a>
-            <a className="rounded-lg border border-rent-border px-3 py-2 text-slate-200" href="https://github.com/LoLoSenPai/rentback" aria-label="GitHub">
+            <a className="rounded-lg border border-rent-border px-3 py-2 text-slate-200" href="#" aria-label="GitHub placeholder">
               GitHub
+            </a>
+            <a className="rounded-lg border border-rent-border px-3 py-2 text-slate-200" href="#" aria-label="Builder attribution placeholder">
+              Builder
             </a>
           </div>
         </section>
@@ -329,3 +555,7 @@ export default function HomePage() {
     </main>
   );
 }
+
+
+
+
