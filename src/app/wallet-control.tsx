@@ -18,10 +18,11 @@ export function WalletControl({ open, onOpenChange, onUseWallet }: {
   const wallets = mounted ? discovered : [];
   const status = useWalletStatus(walletClient);
   const [chooseApp, setChooseApp] = useState(false);
+  const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const inFlight = useRef(false);
-  const busy = status === "connecting" || status === "disconnecting";
+  const busy = pending || status === "connecting" || status === "disconnecting";
   const accounts = wallets.find((wallet) => wallet.name === connected?.wallet.name)?.accounts
     .filter((account) => account.chains.includes("solana:mainnet")) ?? [];
 
@@ -30,25 +31,35 @@ export function WalletControl({ open, onOpenChange, onUseWallet }: {
     else dialog.current?.close();
   }, [open]);
 
-  function close() { onOpenChange(false); setChooseApp(false); }
-  async function action(run: () => Promise<unknown>) {
-    if (inFlight.current) return;
+  function close() {
+    // Release the native dialog's top layer and inert background synchronously.
+    // MWA can display its own permission UI before connect() resolves.
+    dialog.current?.close();
+    onOpenChange(false);
+    setChooseApp(false);
+  }
+  async function action(run: () => Promise<unknown>, handoff = false) {
+    if (inFlight.current || busy) return;
     inFlight.current = true;
+    setPending(true);
     setError(null);
+    // No await here: preserve the selecting click's trusted user gesture.
+    if (handoff) close();
     try { await run(); close(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Wallet connection failed. Please try again."); }
-    finally { inFlight.current = false; }
+    finally { inFlight.current = false; setPending(false); }
   }
 
-  return <>
-    <button type="button" className={buttonClass} aria-haspopup="dialog" onClick={() => { setChooseApp(false); onOpenChange(true); }}>
-      {connected ? shortWallet(connected.account.address) : "Connect wallet"}
+  return <div className="relative min-w-0">
+    <button type="button" className={buttonClass} disabled={busy} aria-busy={busy} aria-haspopup="dialog" onClick={() => { setError(null); setChooseApp(false); onOpenChange(true); }}>
+      {busy ? status === "disconnecting" ? "Disconnecting..." : "Connecting..." : connected ? shortWallet(connected.account.address) : "Connect wallet"}
     </button>
-    <dialog ref={dialog} onCancel={close} onClick={(event) => { if (event.target === dialog.current && !busy) close(); }}
+    {error && !open && <p role="alert" className="absolute right-0 top-full z-10 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-xl border border-rent-border bg-rent-panel p-3 text-sm text-red-300 break-words">{error}</p>}
+    <dialog ref={dialog} onCancel={close} onClick={(event) => { if (event.target === dialog.current) close(); }}
       aria-labelledby="wallet-dialog-title" className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[85dvh] w-full max-w-none overflow-y-auto rounded-t-3xl border border-rent-border bg-rent-panel p-6 text-slate-100 shadow-2xl backdrop:bg-black/70 sm:inset-0 sm:m-auto sm:max-w-sm sm:rounded-3xl">
       <div className="flex items-center justify-between gap-3">
         <h2 id="wallet-dialog-title" className="text-xl font-semibold">{connected && !chooseApp ? "Your wallet" : "Choose a wallet app"}</h2>
-        <button type="button" onClick={close} disabled={busy} aria-label="Close wallet chooser" className={buttonClass}>Close</button>
+        <button type="button" onClick={close} aria-label="Close wallet chooser" className={buttonClass}>Close</button>
       </div>
       {error && <p role="alert" className="mt-3 break-words text-sm text-red-300">{error}</p>}
       {connected && !chooseApp ? <div className="mt-5 space-y-3">
@@ -75,7 +86,7 @@ export function WalletControl({ open, onOpenChange, onUseWallet }: {
         {wallets.length === 0 && <p className="text-sm text-slate-300">No compatible wallets detected. Open RentBack in your wallet browser or Android Chrome with an installed Solana wallet.</p>}
         {wallets.map((wallet, index) => <button key={`${wallet.name}-${index}`} type="button" disabled={busy}
           className={`${buttonClass} flex w-full items-center gap-3 text-left`}
-          onClick={() => void action(() => walletClient.wallet.connect(wallet))}>
+          onClick={() => void action(() => walletClient.wallet.connect(wallet), true)}>
           {/* Wallet Standard supplies the wallet's own data-URI icon. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={wallet.icon} alt="" width={32} height={32} className="h-8 w-8 shrink-0 rounded-lg" />
@@ -84,5 +95,5 @@ export function WalletControl({ open, onOpenChange, onUseWallet }: {
         {busy && <p role="status" className="pt-3 text-sm text-rent-accent">Continue in your wallet app...</p>}
       </div>}
     </dialog>
-  </>;
+  </div>;
 }
