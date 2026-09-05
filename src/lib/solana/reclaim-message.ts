@@ -35,10 +35,34 @@ export function compareReclaimMessages(preparedBytes: ReadonlyUint8Array, return
     const differences: string[] = [];
     if (prepared.feePayer !== returned.feePayer) differences.push("fee payer changed");
     if (prepared.recentBlockhash !== returned.recentBlockhash) differences.push("recent blockhash changed");
-    if (JSON.stringify(prepared.accountMetas) !== JSON.stringify(returned.accountMetas)) differences.push("account addresses, privileges or ordering changed");
+    if (JSON.stringify(prepared.accountMetas) !== JSON.stringify(returned.accountMetas)) {
+      const byAddress = (metas: typeof prepared.accountMetas) =>
+        [...metas].sort((left, right) => left.address < right.address ? -1 : left.address > right.address ? 1 : 0);
+      differences.push(
+        JSON.stringify(byAddress(prepared.accountMetas)) === JSON.stringify(byAddress(returned.accountMetas))
+          ? "account table reordered (same addresses and privileges)"
+          : "account addresses or privileges changed",
+      );
+    }
     if (prepared.instructionCount !== returned.instructionCount) differences.push(`instruction count changed (${prepared.instructionCount} to ${returned.instructionCount})`);
     const budgets = (m: typeof prepared) => m.instructions.filter((i) => i.program === COMPUTE_BUDGET_PROGRAM_ADDRESS);
-    if (JSON.stringify(budgets(prepared)) !== JSON.stringify(budgets(returned))) differences.push("Compute Budget instructions changed");
+    if (JSON.stringify(budgets(prepared)) !== JSON.stringify(budgets(returned))) {
+      // Safe mobile diagnostics: no signatures, raw payloads or wallet addresses.
+      // Positions are one-based; price stays an exact decimal string.
+      const summarize = (message: typeof prepared) => {
+        const instructions = budgets(message);
+        const summary = instructions.slice(0, 2).map((instruction) => {
+          const value = instruction.kind === "SetComputeUnitLimit"
+            ? `limit=${instruction.units} CU`
+            : instruction.kind === "SetComputeUnitPrice"
+              ? `price=${instruction.microLamports} microLamports/CU`
+              : "unrecognized instruction";
+          return `${value}@${instruction.index + 1}`;
+        }).join(", ");
+        return (summary || "none") + (instructions.length > 2 ? `, +${instructions.length - 2} more` : "");
+      };
+      differences.push(`Compute Budget instructions changed (prepared: ${summarize(prepared)}; wallet: ${summarize(returned)})`);
+    }
     const withdrawals = (m: typeof prepared) => m.instructions.filter((i) => i.kind === "WithdrawExcessLamports").map(({ index: _index, ...i }) => i);
     if (JSON.stringify(withdrawals(prepared)) !== JSON.stringify(withdrawals(returned))) differences.push("withdrawal source, destination, authority, program or ordering changed");
     if (!identical && !differences.length) differences.push("instruction data, ordering or message encoding changed");
