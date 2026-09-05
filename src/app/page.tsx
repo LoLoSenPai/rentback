@@ -1,9 +1,12 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { useConnectedWallet, useConnect, useDisconnect, useWalletStatus, useWallets } from "@solana/kit-plugin-wallet/react";
+import { BuilderLinks } from "./builder-links";
+import { useConnectedWallet } from "@solana/kit-plugin-wallet/react";
 import { RENT_PHASES } from "@/lib/rent-phases";
 import { buildScanViewModel } from "@/lib/solana/scan-display";
+import { ReclaimPanel } from "@/app/reclaim-panel";
+import { WalletControl } from "@/app/wallet-control";
 import { walletClient } from "@/lib/solana/wallet-client";
 import {
   getWalletOwnershipState,
@@ -35,20 +38,6 @@ function formatProgramSummary(programCounts: Record<string, number>): string {
     .join(" · ");
 }
 
-function getReclaimContext(result: WalletScanResponse | null, connectedWalletAddress: string | null): WalletOwnershipContext {
-  return {
-    scanResult: result
-      ? {
-          scannedWallet: result.scannedWallet,
-          totals: {
-            claimableNowLamports: result.totals.claimableNowLamports,
-          },
-        }
-      : null,
-    connectedWalletAddress,
-  };
-}
-
 export default function HomePage() {
   const [walletAddress, setWalletAddress] = useState("");
   const [isScanning, setIsScanning] = useState(false);
@@ -59,20 +48,7 @@ export default function HomePage() {
   const [walletPickerOpen, setWalletPickerOpen] = useState(false);
 
   const connectedWallet = useConnectedWallet(walletClient);
-  const wallets = useWallets(walletClient);
-  const walletStatus = useWalletStatus(walletClient);
-  const { dispatch: connectWallet, isRunning: isConnecting } = useConnect(walletClient);
-  const { dispatch: disconnectWallet, isRunning: isDisconnecting } = useDisconnect(walletClient);
   const connectedWalletAddress = connectedWallet?.account.address ?? null;
-
-  const isWalletActioning = isConnecting || isDisconnecting;
-  const isWalletReadinessPending = walletStatus === "pending" || walletStatus === "reconnecting";
-
-  const reclaimContext = useMemo(
-    () => getReclaimContext(result, connectedWalletAddress),
-    [connectedWalletAddress, result],
-  );
-  const walletState = getWalletOwnershipState(reclaimContext);
 
   const viewModel = useMemo(() => (result ? buildScanViewModel(result) : null), [result]);
   const eligibleAccounts = useMemo(() => viewModel?.accountRows.filter((account) => account.isClaimEligible) ?? [], [viewModel]);
@@ -93,9 +69,9 @@ export default function HomePage() {
   const showTechnicalSummary = hasScanned && viewModel !== null;
 
   const shouldShowUseConnectedWallet = shouldShowUseConnectedWalletAction(walletAddress, connectedWalletAddress);
-  const showWalletPicker = walletPickerOpen;
 
-  const hasClaimableResult = result?.totals.claimableNowLamports !== "0";
+
+
 
   const educationalSection = (
     <section className="mx-auto w-full max-w-3xl rounded-2xl border border-rent-border bg-rent-panel/90 p-5 shadow-panel">
@@ -133,160 +109,12 @@ export default function HomePage() {
     </section>
   );
 
-  const walletStatusPanel = (
-    <section className="mx-auto w-full max-w-3xl rounded-2xl border border-rent-border bg-rent-panel/90 p-5 shadow-panel">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <h2 className="text-lg font-semibold text-white">Wallet connection</h2>
-        <p className="text-xs text-slate-400">
-          {connectedWalletAddress ? `Connected: ${shortenAddress(connectedWalletAddress)}` : "No wallet connected"}
-        </p>
-      </div>
-
-      {!connectedWalletAddress && !isWalletReadinessPending ? (
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={() => setWalletPickerOpen((open) => !open)}
-            disabled={isWalletActioning}
-            className="rounded-lg border border-rent-border bg-rent-bg/70 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-rent-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Connect wallet
-          </button>
-          <p className="mt-2 text-sm text-slate-300">Choose a wallet from Wallet Standard discovery.</p>
-        </div>
-      ) : null}
-
-      {connectedWalletAddress ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await disconnectWallet();
-              } catch {
-                setError("Unable to disconnect wallet.");
-              }
-            }}
-            disabled={isWalletActioning}
-            className="rounded-lg border border-rent-border px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-rent-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Disconnect wallet
-          </button>
-          <button
-            type="button"
-            onClick={() => setWalletPickerOpen((open) => !open)}
-            disabled={isWalletActioning}
-            className="rounded-lg border border-rent-border px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-rent-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {walletPickerOpen ? "Hide wallets" : "Switch wallet"}
-          </button>
-        </div>
-      ) : null}
-
-      {isWalletReadinessPending ? (
-        <p className="mt-3 text-sm text-slate-400">Checking wallet availability...</p>
-      ) : null}
-
-      {showWalletPicker ? (
-        wallets.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-400">No Wallet Standard wallets were discovered.</p>
-        ) : (
-          <div className="mt-3">
-            {wallets.length === 1 ? (
-              <p className="mb-2 text-xs uppercase tracking-[0.15em] text-slate-400">
-                {wallets.length} compatible wallet detected
-              </p>
-            ) : (
-              <p className="mb-2 text-xs uppercase tracking-[0.15em] text-slate-400">
-                {wallets.length} compatible wallets detected
-              </p>
-            )}
-            <div className="flex flex-wrap gap-2">
-            {wallets.map((wallet, index) => (
-              <button
-                key={`${wallet.name}-${index}`}
-                type="button"
-                disabled={isWalletActioning}
-                onClick={() => {
-                  void handleConnectWallet(wallet);
-                  setWalletPickerOpen(false);
-                }}
-                className="rounded-lg border border-rent-border px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-rent-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {wallet.name}
-              </button>
-            ))}
-            </div>
-          </div>
-        )
-      ) : null}
-
-      {walletState.state === "disconnected" && hasClaimableResult ? (
-        <div className="mt-4 rounded-xl border border-rent-border bg-rent-bg/70 p-3">
-          <p className="text-sm text-slate-200">
-            {claimableNow} available to reclaim.
-          </p>
-          <p className="mt-1 text-xs text-slate-400">Connect the scanned wallet to prepare the reclaim.</p>
-        </div>
-      ) : null}
-
-      {walletState.state === "matching" ? (
-        <div className="mt-4 rounded-xl border border-rent-border bg-rent-bg/70 p-3">
-          <p className="text-sm text-slate-200">{claimableNow} ready to reclaim.</p>
-          <p className="mt-1 text-xs text-rent-accent">Wallet connected to scanned address.</p>
-          <button
-            type="button"
-            disabled
-            className="mt-3 rounded-lg border border-rent-accent/70 px-3 py-2 text-sm font-semibold text-rent-accent"
-          >
-            Reclaim {claimableNow}
-          </button>
-          <p className="mt-1 text-[11px] text-slate-400">Reclaim flow is prepared for a later milestone.</p>
-        </div>
-      ) : null}
-
-      {walletState.state === "mismatched" ? (
-        <div className="mt-4 rounded-xl border border-rent-border bg-rent-bg/70 p-3">
-          <p className="text-sm text-white">This is not the wallet you scanned.</p>
-          <p className="mt-2 text-xs text-slate-300">Scanned: {shortenAddress(result?.scannedWallet ?? "")}</p>
-          <p className="text-xs text-slate-300">Connected: {shortenAddress(connectedWalletAddress ?? "")}</p>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                if (connectedWallet) {
-                  await disconnectWallet();
-                }
-                setWalletPickerOpen(true);
-              } catch {
-                setError("Unable to switch wallet.");
-              }
-            }}
-            disabled={isWalletActioning}
-            className="mt-3 rounded-lg border border-rent-accent/80 px-3 py-2 text-sm font-semibold text-rent-accent transition hover:border-rent-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Connect scanned wallet
-          </button>
-        </div>
-      ) : null}
-
-      {walletState.state === "no-claimable" ? (
-        <div className="mt-4 rounded-xl border border-rent-border bg-rent-bg/70 p-3">
-          <p className="text-sm text-slate-200">No excess SOL currently available to reclaim.</p>
-        </div>
-      ) : null}
-    </section>
-  );
-
-  async function handleConnectWallet(selectedWallet: Parameters<typeof connectWallet>[0]) {
-    try {
-      await connectWallet(selectedWallet);
-      setWalletPickerOpen(false);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to connect wallet.");
-    }
-  }
+  const walletStatusPanel = result ? <ReclaimPanel scan={result} onConnect={() => setWalletPickerOpen(true)} onRescan={async (owner) => {
+    const response = await fetch("/api/scan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ walletAddress: owner }) });
+    const payload = await response.json() as ScanResponse;
+    if (!response.ok || "error" in payload) throw new Error("error" in payload ? payload.error : "Unable to refresh scan.");
+    setResult((current) => current?.scannedWallet === owner ? payload : current);
+  }} /> : null;
 
   function handleUseConnectedWallet() {
     if (!connectedWalletAddress) {
@@ -343,9 +171,10 @@ export default function HomePage() {
       </div>
 
       <section className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-10 md:px-8">
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3"><span className="font-semibold tracking-tight">RentBack</span><WalletControl open={walletPickerOpen} onOpenChange={setWalletPickerOpen} onUseWallet={setWalletAddress} /></div>
         <header className="mx-auto max-w-3xl text-center">
           <p className="text-xs uppercase tracking-[0.22em] text-slate-400">SOLANA RENT UTILITY</p>
-          <h1 className="mt-4 text-4xl font-black tracking-tight text-white md:text-5xl">Solana rent just dropped.</h1>
+          <h1 className="mt-4 text-4xl font-black tracking-tight text-white md:text-3xl sm:text-5xl">Solana rent just dropped.</h1>
           <p className="mt-3 text-base leading-relaxed text-slate-300 md:text-lg">
             See how much SOL your wallet can reclaim from token accounts.
           </p>
@@ -396,8 +225,8 @@ export default function HomePage() {
                 Paste a wallet and click <span className="font-semibold text-white">Check wallet</span> to calculate reclaimable SOL from all
                 SPL Token and Token-2022 accounts.
               </p>
-            </section>
             {walletStatusPanel}
+            </section>
             {educationalSection}
           </>
         ) : (
@@ -423,9 +252,8 @@ export default function HomePage() {
                   <p className="mt-2 text-[11px] text-slate-500">Final phase estimate, for planning only.</p>
                 </article>
               </div>
-            </section>
-
             {walletStatusPanel}
+            </section>
             {educationalSection}
 
             <section className="mx-auto w-full max-w-3xl rounded-2xl border border-rent-border bg-rent-panel/90 p-5 shadow-panel">
@@ -529,7 +357,7 @@ export default function HomePage() {
             <li>✓ RentBack takes 0% reclaim fee</li>
           </ul>
           <p className="mt-3 text-xs text-slate-500">
-            Reclaim transactions are not available in this milestone. Wallet connection only prepares eligibility checks.
+            Your wallet stays in control. RentBack never asks for your recovery phrase.
           </p>
         </section>
 
@@ -539,17 +367,7 @@ export default function HomePage() {
             When Solana&apos;s first rent reduction went live, I wanted to see what it actually meant for a real wallet. So I built RentBack.
           </p>
           <p className="mt-2 text-sm text-slate-300">Free to scan. 0% reclaim fee. Open source.</p>
-          <div className="mt-4 flex flex-wrap gap-3 text-sm">
-            <a className="rounded-lg border border-rent-border px-3 py-2 text-slate-200" href="#" aria-label="X placeholder">
-              X
-            </a>
-            <a className="rounded-lg border border-rent-border px-3 py-2 text-slate-200" href="#" aria-label="GitHub placeholder">
-              GitHub
-            </a>
-            <a className="rounded-lg border border-rent-border px-3 py-2 text-slate-200" href="#" aria-label="Builder attribution placeholder">
-              Builder
-            </a>
-          </div>
+          <BuilderLinks />
         </section>
       </section>
     </main>

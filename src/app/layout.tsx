@@ -1,14 +1,17 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { WalletProvider } from "./wallet-provider";
+import { SITE_DESCRIPTION, SITE_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: "RentBack",
-  description: "Scan token-account rent exemptions and view Solana SIMD-0437 projections.",
-  robots: {
-    index: false,
-    follow: false,
-  },
+  metadataBase: new URL(SITE_URL),
+  title: "RentBack | Reclaim excess SOL",
+  description: SITE_DESCRIPTION,
+  alternates: { canonical: "/" },
+  icons: { icon: "/rentback-icon.svg" },
+  openGraph: { type: "website", url: SITE_URL, siteName: "RentBack", title: "RentBack | Reclaim excess SOL", description: SITE_DESCRIPTION },
+  twitter: { card: "summary_large_image", title: "RentBack | Reclaim excess SOL", description: SITE_DESCRIPTION, images: [`${SITE_URL}/opengraph-image`] },
+  robots: { index: true, follow: true },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

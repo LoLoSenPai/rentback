@@ -1,66 +1,54 @@
 # RentBack
 
-RentBack is a public utility for scanning token accounts on Solana and showing **read-only excess rent** currently reclaimable from each account.
+RentBack scans any public Solana wallet and reclaims excess SOL from overfunded SPL Token and Token-2022 accounts. Scanning requires no connection or signature. Reclaiming requires the exact owning wallet and explicit approval of each transaction.
 
-This first iteration intentionally stops at:
+Production: https://rentback.lololabs.xyz
+Source: https://github.com/LoLoSenPai/rentback
 
-1. address validation
-2. on-chain read-only scanning for SPL Token and Token-2022 token accounts
-3. rent projection math and projections UI
-4. no wallet connection and no `WithdrawExcessLamports` execution
+## Current implementation
 
-## What it does (today)
+- Solana Kit, Wallet Standard and client-only Android Mobile Wallet Adapter discovery. No legacy wallet-adapter migration, auto-connect or sign-message flow.
+- Fresh mainnet account ownership, actual data sizes and rent revalidation before reclaim. Wrapped/native SOL is excluded.
+- Official WithdrawExcessLamports instructions, explicit conservative Compute Budget instructions, size-measured batching, simulations, exact signed-message checks and sequential consent.
+- No tokens transferred or burned, no accounts closed, no RentBack transfer or tip. RentBack takes 0% reclaim fee; standard network fees apply.
+- Bigint monetary accounting with explicit decimal-string API DTOs.
+- Confirmed receipt accounting and partial-success recovery. A zero-excess rescan presents the confirmed total and unique processed accounts, optional X sharing and collapsed history. Receipts are local to the browser tab/session, not a global account-history service.
+- Future rent phase projections are estimates, not guarantees.
 
-- Validates a provided Solana wallet address.
-- Scans both SPL Token and Token-2022 accounts for that owner.
-- Reads each account’s actual account size and lamport balance.
-- Queries `getMinimumBalanceForRentExemption` by unique size from RPC.
-- Computes claimable claimable lamports using bigint arithmetic.
-- Displays current claimable totals and phase projections:
-  - phase 2 expected unlock
-  - final phase (phase 5, planned 90% reduction) unlock
-- Excludes wrapped/native SOL token accounts from claiming logic.
-- Renders a dark single-screen UI with account details in a collapsible section.
+The user has completed a real mainnet reclaim of 10,689,097 lamports across 58 token accounts. This is an observed test result, not a promise of returns for other wallets. Physical Seeker/Seed Vault testing remains a manual release check.
 
-## Tech stack
+## Run and validate
 
-- Next.js App Router (TypeScript)
-- Tailwind CSS
-- `@solana/kit`
-- `@solana/react`
-- `@solana/kit-plugin-rpc`
-- `@solana/kit-plugin-wallet`
-- `@solana-program/token`
-- `@solana-program/token-2022`
-
-## Configuration
-
-Set `SOLANA_RPC_URL` in your environment for a custom RPC endpoint.
-Keep production credentials in server-side environment only.
-
-```bash
-SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+```sh
+pnpm install --frozen-lockfile
+pnpm dev
+pnpm test
+pnpm lint
+pnpm typecheck
+pnpm build
+pnpm start
 ```
 
-Do not commit secrets.
+Default tests never broadcast mainnet transactions. The devnet fixture is explicitly opt-in. See docs/reclaim.md for security boundaries, including the sending-only wallet transport limitation.
 
-## Validation
+## Configuration and deployment
 
-- Unit tests cover bigint rent/excess calculations and wrapped-native exclusion.
-- The project includes:
-  - `pnpm test`
-  - `pnpm lint`
-  - `pnpm typecheck`
-  - `pnpm build`
+Set `SOLANA_RPC_URL` in the server deployment environment. A private mainnet RPC is recommended for production capacity. Do not prefix credentials with `NEXT_PUBLIC`. No credentials belong in public files, client code or committed environment files. `.env.example` contains only a public endpoint and empty optional settings.
 
-## Project structure
+The public canonical/share/MWA identity lives in `src/lib/site.ts`. It points to the production HTTPS URL; it is not derived from an untrusted Host header. Optional builder name and X URL can remain unset. Mainnet explorer links intentionally have no devnet/testnet override.
 
-- `src/app/page.tsx`: scanner UI
-- `src/app/api/scan/route.ts`: server-side scanner endpoint
-- `src/lib/solana/scan.ts`: read-only scan orchestration
-- `src/lib/rent-calculations.ts`: bigint rent/projection helpers
-- `src/lib/rent-phases.ts`: SIMD-0437 phase configuration
+Public scans are limited per process: 30/minute per client (shared by default), 120/minute globally, four concurrent scans, 1 KiB JSON bodies, bounded client-bucket memory, and HTTP 429 with Retry-After. Set `TRUST_PROXY_IP_HEADER` only behind a proxy that overwrites that header and prevents direct origin access. Without it, requests share one bucket. This lightweight limiter resets on process restart and is not shared across replicas. Configure deployment-edge rate limits and request timeouts for hostile traffic or scale; no database is required.
+
+API errors preserve safe actionable application messages but suppress transport URLs, credentials, stack text and unknown SDK internals. Phantom investigation logging is disabled in every production build. Scanning and reclaim execution stay separate.
+
+## Release
+
+See docs/release.md for deployment hygiene and the physical Seeker checklist. Build artifacts, environment files, logs and generated read-only reports are ignored. Commit the pnpm lockfile with source changes. Ignore rules do not remove files already tracked by Git: inspect the staged release and repository history for secrets before publishing.
 
 ## License
 
-MIT
+MIT. See LICENSE. Third-party packages retain their respective licenses.
+## Dynamic result cards
+
+Successful reclaims include an optional dynamic 1200x630 share card and matching X action. See docs/share-cards.md for payloads, complete/partial variants, local preview URLs and the public parameterized-card integrity boundary. Cards are shareable presentation, not independent proof of a transaction.
+
