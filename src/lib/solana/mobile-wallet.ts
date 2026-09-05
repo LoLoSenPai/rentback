@@ -7,7 +7,8 @@ export function registerMobileWallet(): Promise<void> {
   if (!/Android/i.test(navigator.userAgent) || !window.isSecureContext) return Promise.resolve();
   registration ??= import("@solana-mobile/wallet-standard-mobile").then((mwa) => {
     mwa.registerMwa({
-      appIdentity: { name: "RentBack", uri: SITE_URL, icon: `${SITE_URL}/rentback-icon.svg` },
+      // MWA requires icon to be relative to the application's identity URI.
+      appIdentity: { name: "RentBack", uri: SITE_URL, icon: "rentback-icon.svg" },
       chains: ["solana:mainnet"],
       chainSelector: mwa.createDefaultChainSelector(),
       // No authorization is restored across reloads. The adapter holds the
