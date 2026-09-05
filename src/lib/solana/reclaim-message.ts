@@ -40,7 +40,7 @@ export function compareReclaimMessages(preparedBytes: ReadonlyUint8Array, return
         [...metas].sort((left, right) => left.address < right.address ? -1 : left.address > right.address ? 1 : 0);
       differences.push(
         JSON.stringify(byAddress(prepared.accountMetas)) === JSON.stringify(byAddress(returned.accountMetas))
-          ? "account table reordered (same addresses and privileges)"
+          ? `account table reordered (same addresses and privileges; original indices in wallet order: ${returned.accountMetas.slice(0, 32).map((meta) => prepared.accountMetas.findIndex((original) => original.address === meta.address)).join(",")}${returned.accountMetas.length > 32 ? ",..." : ""})`
           : "account addresses or privileges changed",
       );
     }

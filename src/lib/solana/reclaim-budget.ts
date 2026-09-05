@@ -2,12 +2,15 @@ import { getSetComputeUnitLimitInstruction, getSetComputeUnitPriceInstruction } 
 
 export type ReclaimComputeBudget = { units: number; microLamports: string };
 export const RECLAIM_COMPUTE_CEILING = 200_000;
-export const RECLAIM_COMPUTE_PRICE = "1000";
+// Observed in the Seeker wallet's returned message. This is an application
+// policy, not a documented wallet minimum. Set it BEFORE planning, simulation
+// and review; never accept a wallet's post-signature fee edits automatically.
+export const RECLAIM_COMPUTE_PRICE = "100000";
 // Fixed-width instructions are present during packing as well as simulation.
 export const PLANNING_COMPUTE_BUDGET: ReclaimComputeBudget = { units: RECLAIM_COMPUTE_CEILING, microLamports: RECLAIM_COMPUTE_PRICE };
 
 export function assertComputeBudget(budget: ReclaimComputeBudget | undefined): asserts budget is ReclaimComputeBudget {
-  if (!budget || !Number.isSafeInteger(budget.units) || budget.units < 10_000 || budget.units > RECLAIM_COMPUTE_CEILING || budget.microLamports !== RECLAIM_COMPUTE_PRICE) {
+  if (!budget || !Number.isSafeInteger(budget.units) || budget.units < 10_000 || budget.units > RECLAIM_COMPUTE_CEILING || (budget.microLamports !== RECLAIM_COMPUTE_PRICE && budget.microLamports !== "1000")) {
     throw new Error("Invalid reclaim compute budget. Refresh the reclaim review.");
   }
 }
