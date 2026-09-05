@@ -66,7 +66,7 @@ export async function prepareReclaim(rpc: ReclaimRpc, owner: string, scannedWall
   assertOwnerMatch(owner, scannedWallet);
   const accounts = await fetchFreshReclaimAccounts(rpc, owner, candidates);
   const { value: block } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
-  const lifetime = { blockhash: block.blockhash, lastValidBlockHeight: block.lastValidBlockHeight.toString() };
+  const lifetime = { blockhash: block.blockhash, lastValidBlockHeight: block.lastValidBlockHeight.toString(), accountOrder: "program-first-use-v1" as const };
   const groups = planReclaimBatches(accounts, owner, lifetime);
   const batches: ReclaimBatchDto[] = [];
   for (const group of groups) {

@@ -1,3 +1,4 @@
+import { applyReclaimAccountOrder, type ReclaimAccountOrder } from "./reclaim-layout";
 import {
   address, appendTransactionMessageInstructions, blockhash, compileTransaction,
   createNoopSigner, createTransactionMessage, getTransactionEncoder,
@@ -20,7 +21,7 @@ export type ReclaimAccount = {
 export type ReclaimAccountDto = Omit<ReclaimAccount, "lamports" | "rentMinimum" | "excess"> & {
   lamports: string; rentMinimum: string; excess: string;
 };
-export type ReclaimLifetime = { blockhash: string; lastValidBlockHeight: string; computeBudget?: ReclaimComputeBudget };
+export type ReclaimLifetime = { accountOrder?: ReclaimAccountOrder; blockhash: string; lastValidBlockHeight: string; computeBudget?: ReclaimComputeBudget };
 export type ReclaimBatchDto = ReclaimLifetime & {
   accounts: ReclaimAccountDto[]; expectedLamports: string; feeLamports: string;
   simulatedAt: number; expiresAt: number; wireBytes: number;
@@ -74,7 +75,7 @@ export function buildReclaimTransaction(accounts: readonly Pick<ReclaimAccountDt
   const message = appendTransactionMessageInstructions(instructions,
     setTransactionMessageLifetimeUsingBlockhash({ blockhash: blockhash(lifetime.blockhash), lastValidBlockHeight: decimalLamports(lifetime.lastValidBlockHeight) },
       setTransactionMessageFeePayer(address(owner), createTransactionMessage({ version: 0 }))));
-  return compileTransaction(message);
+  return applyReclaimAccountOrder(compileTransaction(message), lifetime.accountOrder);
 }
 // Historical receipt verification only. Never used to prepare, sign or submit a new reclaim.
 export function buildLegacyReceiptTransaction(accounts: readonly Pick<ReclaimAccountDto, "address" | "program">[], owner: string, lifetime: ReclaimLifetime, signer?: TransactionSigner) {
