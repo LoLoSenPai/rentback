@@ -1,3 +1,7 @@
 allowBuilds:
   esbuild: true
   unrs-resolver: true
+
+# Next.js pins an older PostCSS; keep its copy on the security-patched release.
+overrides:
+  next>postcss: 8.5.28
