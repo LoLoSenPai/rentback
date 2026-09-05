@@ -32,7 +32,7 @@ describe("reclaim review consent", () => {
     expect(screen.getByText(blocked.error).closest("details")?.open).toBe(false);
     expect(screen.getByText("Blocked before submission")).toBeTruthy();
     expect(screen.queryByText("Awaiting wallet or network outcome")).toBeNull();
-    expect(screen.getByRole("link", { name: "Share on X" }).getAttribute("href")).not.toContain(wallet);
+    expect(screen.getByRole("link", { name: "Download image" }).getAttribute("href")).not.toContain(wallet);
     const preview = screen.getByRole("link", { name: "Preview share card" }).getAttribute("href")!;
     expect(preview).toContain("amount=0.010689097"); expect(preview).toContain("accounts=58"); expect(preview).toContain("txs=3");
     expect(preview).not.toContain(wallet);
@@ -57,6 +57,17 @@ describe("reclaim review consent", () => {
     await screen.findByRole("alert");
     expect(screen.getByRole("alert").textContent).toContain("Instruction 0: Custom 12");
     expect(screen.queryByRole("button", { name: /^Reclaim / })).toBeNull(); expect(mocks.execute).not.toHaveBeenCalled();
+  });
+  it("shows the bounded wallet fee before signing without requesting approval automatically", async () => {
+    const bounded = review();
+    bounded.batches[0].walletPolicy = "lighthouse-assertions-v1";
+    mocks.request.mockResolvedValue(bounded);
+    render(<ReclaimPanel scan={scan} onConnect={vi.fn()} onRescan={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Review reclaim" }));
+    const disclosure = await screen.findByText(/Maximum network fee:/);
+    expect(disclosure.textContent).toContain("0.000025 SOL per transaction");
+    expect(disclosure.textContent).toContain("0.000025 SOL for this review");
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
   it("expires prepared reviews and requires a fresh review", async () => {
     const expired = review(); expired.batches[0].expiresAt = Date.now() - 1;

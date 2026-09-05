@@ -7,14 +7,14 @@ import { getTokenDecoder, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { getTokenDecoder as getToken2022Decoder, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { getConfiguredRpcUrl } from "./rpc";
 import {
-  assertOwnerMatch, buildReclaimTransaction, decimalLamports, equalBytes, MAX_TRANSACTION_BYTES,
+  assertOwnerMatch, buildReclaimTransaction, decimalLamports, MAX_TRANSACTION_BYTES,
   planReclaimBatches, RECLAIM_PROGRAMS, REVIEW_LIFETIME_MS, toReclaimAccountDto, transactionBytes,
   type ReclaimAccount, type ReclaimAccountDto, type ReclaimBatchDto, type ReclaimReceipt, type ReclaimReview,
 } from "./reclaim";
 
 import { assertComputeBudget, computeBudgetFromSimulation } from "./reclaim-budget";
 import { buildLegacyReceiptTransaction } from "./reclaim";
-import { assertSignedMessageUnchanged } from "./reclaim-message";
+import { assertWalletReclaimMessage, assertWalletFee, RECLAIM_WALLET_POLICY } from "./reclaim-wallet-policy";
 
 export type ReclaimRpc = ReturnType<typeof createSolanaRpc>;
 const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
@@ -66,7 +66,7 @@ export async function prepareReclaim(rpc: ReclaimRpc, owner: string, scannedWall
   assertOwnerMatch(owner, scannedWallet);
   const accounts = await fetchFreshReclaimAccounts(rpc, owner, candidates);
   const { value: block } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
-  const lifetime = { blockhash: block.blockhash, lastValidBlockHeight: block.lastValidBlockHeight.toString(), accountOrder: "program-first-use-v1" as const };
+  const lifetime = { walletPolicy: RECLAIM_WALLET_POLICY, blockhash: block.blockhash, lastValidBlockHeight: block.lastValidBlockHeight.toString(), accountOrder: "program-first-use-v1" as const };
   const groups = planReclaimBatches(accounts, owner, lifetime);
   const batches: ReclaimBatchDto[] = [];
   for (const group of groups) {
@@ -80,6 +80,7 @@ export async function prepareReclaim(rpc: ReclaimRpc, owner: string, scannedWall
     if (simulation.value.err) throw new Error(`Reclaim simulation failed: ${rpcErrorText(simulation.value.err)}. No signature was requested.`);
     const fee = await rpc.getFeeForMessage(getBase64Decoder().decode(transaction.messageBytes) as Parameters<ReclaimRpc["getFeeForMessage"]>[0], { commitment: "confirmed" }).send();
     if (fee.value === null) throw new Error("Unable to estimate transaction fee. Refresh the review.");
+    assertWalletFee(fee.value, finalLifetime);
     const simulatedAt = Date.now();
     batches.push({ ...finalLifetime, accounts: group, expectedLamports: group.reduce((sum, a) => sum + decimalLamports(a.excess), 0n).toString(), feeLamports: fee.value.toString(), simulatedAt, expiresAt: simulatedAt + REVIEW_LIFETIME_MS, wireBytes: transactionBytes(group, owner, finalLifetime) });
   }
@@ -98,13 +99,16 @@ export async function submitReclaim(rpc: ReclaimRpc, owner: string, scannedWalle
   if (ordered.some((account) => !account)) throw new Error("Account eligibility changed. Refresh remaining excess before signing again.");
   if (ordered.some((account, index) => account!.excess !== batch.accounts[index].excess || account!.rentMinimum !== batch.accounts[index].rentMinimum || account!.dataSize !== batch.accounts[index].dataSize)) throw new Error("Account balance or rent changed since review. Refresh remaining excess.");
   const expected = buildReclaimTransaction(ordered as ReclaimAccountDto[], owner, batch);
-  if (!equalBytes(transaction.messageBytes, expected.messageBytes)) {
-    try { assertSignedMessageUnchanged(expected.messageBytes, transaction.messageBytes); }
-    catch (cause) { throw new Error(`Signed transaction differs from the approved reclaim instructions. ${cause instanceof Error ? cause.message : "Submission stopped."}`); }
-  }
+  try { assertWalletReclaimMessage(expected.messageBytes, transaction.messageBytes, batch); }
+  catch (cause) { throw new Error(`Signed transaction differs from the approved reclaim instructions. ${cause instanceof Error ? cause.message : "Submission stopped."}`); }
   if (await rpc.getBlockHeight({ commitment: "confirmed" }).send() > decimalLamports(batch.lastValidBlockHeight)) throw new Error("Transaction expired. Refresh the review.");
   const simulation = await rpc.simulateTransaction(getBase64EncodedWireTransaction(transaction), { encoding: "base64", sigVerify: true, commitment: "confirmed" }).send();
   if (simulation.value.err) throw new Error(`Signed reclaim simulation failed: ${rpcErrorText(simulation.value.err)}`);
+  if (batch.walletPolicy) {
+    const fee = await rpc.getFeeForMessage(getBase64Decoder().decode(transaction.messageBytes) as Parameters<ReclaimRpc["getFeeForMessage"]>[0], { commitment: "confirmed" }).send();
+    if (fee.value === null) throw new Error("Unable to estimate signed transaction fee. Nothing was submitted by RentBack.");
+    assertWalletFee(fee.value, batch);
+  }
   // RPC verifies the actual signature; no server key or signing authority exists.
   const sent = await rpc.sendTransaction(getBase64EncodedWireTransaction(transaction), { encoding: "base64", skipPreflight: false, preflightCommitment: "confirmed", maxRetries: 0n }).send();
   if (sent !== getSignatureFromTransaction(transaction)) throw new Error("RPC returned an unexpected transaction signature.");
@@ -120,7 +124,9 @@ export async function readReclaimReceipt(rpc: ReclaimRpc, receipt: ReclaimReceip
       if (!tx.meta) throw new Error("Transaction metadata is not available yet.");
       const decoded = getTransactionDecoder().decode(getBase64Encoder().encode(tx.transaction[0]));
       const expected = receipt.batch.computeBudget ? buildReclaimTransaction(receipt.batch.accounts, receipt.owner, receipt.batch) : buildLegacyReceiptTransaction(receipt.batch.accounts, receipt.owner, receipt.batch);
-      if (!equalBytes(decoded.messageBytes, expected.messageBytes)) throw new Error("Confirmed transaction differs from the reviewed reclaim.");
+      try { assertWalletReclaimMessage(expected.messageBytes, decoded.messageBytes, receipt.batch); }
+      catch { throw new Error("Confirmed transaction differs from the reviewed reclaim."); }
+      assertWalletFee(tx.meta.fee, receipt.batch);
       const message = getCompiledTransactionMessageDecoder().decode(decoded.messageBytes);
       if (message.version !== 0) throw new Error("Unexpected transaction version.");
       let actual = 0n;

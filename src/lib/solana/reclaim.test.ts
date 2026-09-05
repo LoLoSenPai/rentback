@@ -51,7 +51,7 @@ describe("Phantom mutation regression and complete-message planning", () => {
     expect(diff.returned?.instructionCount).toBe(8);
     expect(diff.prepared?.feePayer).toBe(diff.returned?.feePayer);
     expect(diff.prepared?.recentBlockhash).toBe(diff.returned?.recentBlockhash);
-    expect(diff.differences).toContain("Compute Budget instructions changed");
+    expect(diff.differences).toEqual(expect.arrayContaining([expect.stringContaining("Compute Budget instructions changed")]));
     expect(diff.differences.some((d) => d.startsWith("withdrawal"))).toBe(false);
     expect(() => assertSignedMessageUnchanged(old.messageBytes, enhanced.messageBytes)).toThrow(/Compute Budget/);
   });
@@ -68,7 +68,7 @@ describe("Phantom mutation regression and complete-message planning", () => {
     }
   });
   it("derives a bounded limit with upward-rounded 10% margin and refuses unsafe/missing budgets", () => {
-    expect(computeBudgetFromSimulation(12345n)).toEqual({ units: 13580, microLamports: "1000" });
+    expect(computeBudgetFromSimulation(12345n)).toEqual({ units: 13580, microLamports: "100000" });
     expect(computeBudgetFromSimulation(1n).units).toBe(10000);
     expect(() => computeBudgetFromSimulation(undefined)).toThrow(/compute usage/);
     expect(() => computeBudgetFromSimulation(200000n)).toThrow(/conservative/);
@@ -132,7 +132,7 @@ describe("Phantom mutation regression and complete-message planning", () => {
     expect(retry.expectedLamports).toBe("1102266");
     expect(history.reduce((sum, r) => sum + BigInt(r.actualLamports!), 0n)).toBe(9586831n);
     expect(9586831n + BigInt(retry.expectedLamports)).toBe(10689097n);
-    expect(retry.batches[0].computeBudget).toEqual({ units: 11000, microLamports: "1000" });
+    expect(retry.batches[0].computeBudget).toEqual({ units: 11000, microLamports: "100000" });
     const submit = vi.fn();
     const signer: TransactionModifyingSigner = { address: address(owner), modifyAndSignTransactions: vi.fn(async (txs: Parameters<TransactionModifyingSigner["modifyAndSignTransactions"]>[0]) => txs.map((tx) => ({ ...tx, signatures: { [owner]: new Uint8Array(64).fill(1) } }))) as unknown as TransactionModifyingSigner["modifyAndSignTransactions"] };
     await executeReviewedBatch(retry, owner, { getConnection: () => ({ address: owner, walletId: "Fixture", signer }), onReceipt: vi.fn(), submit });

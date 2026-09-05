@@ -1,4 +1,5 @@
 import { applyReclaimAccountOrder, type ReclaimAccountOrder } from "./reclaim-layout";
+import { walletMessageReserve, assertWalletFee, type ReclaimWalletPolicy } from "./reclaim-wallet-policy";
 import {
   address, appendTransactionMessageInstructions, blockhash, compileTransaction,
   createNoopSigner, createTransactionMessage, getTransactionEncoder,
@@ -21,7 +22,7 @@ export type ReclaimAccount = {
 export type ReclaimAccountDto = Omit<ReclaimAccount, "lamports" | "rentMinimum" | "excess"> & {
   lamports: string; rentMinimum: string; excess: string;
 };
-export type ReclaimLifetime = { accountOrder?: ReclaimAccountOrder; blockhash: string; lastValidBlockHeight: string; computeBudget?: ReclaimComputeBudget };
+export type ReclaimLifetime = { walletPolicy?: ReclaimWalletPolicy; accountOrder?: ReclaimAccountOrder; blockhash: string; lastValidBlockHeight: string; computeBudget?: ReclaimComputeBudget };
 export type ReclaimBatchDto = ReclaimLifetime & {
   accounts: ReclaimAccountDto[]; expectedLamports: string; feeLamports: string;
   simulatedAt: number; expiresAt: number; wireBytes: number;
@@ -96,12 +97,12 @@ export function planReclaimBatches(accounts: readonly ReclaimAccountDto[], owner
     if (seen.has(account.address)) throw new Error("Duplicate reclaim account.");
     seen.add(account.address);
     if (decimalLamports(account.excess) === 0n) continue;
-    if (transactionBytes([...current, account], owner, lifetime) > MAX_TRANSACTION_BYTES) {
+    if (transactionBytes([...current, account], owner, lifetime) + walletMessageReserve(lifetime) > MAX_TRANSACTION_BYTES) {
       if (!current.length) throw new Error("Account cannot fit in a transaction.");
       groups.push(current); current = [];
     }
     current.push(account);
-    if (transactionBytes(current, owner, lifetime) > MAX_TRANSACTION_BYTES) throw new Error("Transaction exceeds network size limit.");
+    if (transactionBytes(current, owner, lifetime) + walletMessageReserve(lifetime) > MAX_TRANSACTION_BYTES) throw new Error("Transaction exceeds network size limit.");
   }
   if (current.length) groups.push(current);
   return groups;
@@ -115,6 +116,7 @@ export function assertReviewReady(review: ReclaimReview, owner: string, now = Da
   const sources = new Set<string>();
   for (const batch of review.batches) {
     assertComputeBudget(batch.computeBudget);
+    assertWalletFee(decimalLamports(batch.feeLamports), batch);
     if (now >= batch.expiresAt || batch.expiresAt - batch.simulatedAt > REVIEW_LIFETIME_MS || batch.simulatedAt > now + 5000) throw new Error("Review expired. Refresh before signing.");
     let subtotal = 0n;
     for (const account of batch.accounts) {
@@ -124,7 +126,7 @@ export function assertReviewReady(review: ReclaimReview, owner: string, now = Da
       if (!excess || decimalLamports(account.lamports) - decimalLamports(account.rentMinimum) !== excess) throw new Error("Inconsistent reclaim amounts.");
       subtotal += excess; count++;
     }
-    if (subtotal !== decimalLamports(batch.expectedLamports) || transactionBytes(batch.accounts, owner, batch) > MAX_TRANSACTION_BYTES) throw new Error("Invalid transaction review.");
+    if (subtotal !== decimalLamports(batch.expectedLamports) || transactionBytes(batch.accounts, owner, batch) + walletMessageReserve(batch) > MAX_TRANSACTION_BYTES) throw new Error("Invalid transaction review.");
     total += subtotal; fees += decimalLamports(batch.feeLamports);
   }
   if (total !== decimalLamports(review.expectedLamports) || fees !== decimalLamports(review.feeLamports) || count !== review.eligibleAccounts) throw new Error("Invalid review totals.");

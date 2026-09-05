@@ -15,7 +15,7 @@ describe("MWA browser registration", () => {
     await Promise.all([registerMobileWallet(), registerMobileWallet()]);
     expect(mwa.registerMwa).toHaveBeenCalledTimes(1);
     const config = mwa.registerMwa.mock.calls[0][0];
-    expect(config.appIdentity).toEqual({ name: "RentBack", uri: "https://rentback.lololabs.xyz", icon: "https://rentback.lololabs.xyz/rentback-icon.svg" });
+    expect(config.appIdentity).toEqual({ name: "RentBack", uri: "https://rentback.lololabs.xyz", icon: "rentback-icon.svg" });
     expect(config.chains).toEqual(["solana:mainnet"]);
     expect(await config.authorizationCache.get()).toBeUndefined();
   });

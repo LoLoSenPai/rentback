@@ -9,7 +9,7 @@ Source: https://github.com/LoLoSenPai/rentback
 
 - Solana Kit, Wallet Standard and client-only Android Mobile Wallet Adapter discovery. No legacy wallet-adapter migration, auto-connect or sign-message flow.
 - Fresh mainnet account ownership, actual data sizes and rent revalidation before reclaim. Wrapped/native SOL is excluded.
-- Official WithdrawExcessLamports instructions, explicit conservative Compute Budget instructions, size-measured batching, simulations, exact signed-message checks and sequential consent.
+- Official WithdrawExcessLamports instructions, explicit conservative Compute Budget instructions, size-measured batching, simulations, strict signed-message checks and sequential consent.
 - No tokens transferred or burned, no accounts closed, no RentBack transfer or tip. RentBack takes 0% reclaim fee; standard network fees apply.
 - Bigint monetary accounting with explicit decimal-string API DTOs.
 - Confirmed receipt accounting and partial-success recovery. A zero-excess rescan presents the confirmed total and unique processed accounts, optional X sharing and collapsed history. Receipts are local to the browser tab/session, not a global account-history service.
@@ -52,3 +52,7 @@ MIT. See LICENSE. Third-party packages retain their respective licenses.
 
 Successful reclaims include an optional dynamic 1200x630 share card and matching X action. See docs/share-cards.md for payloads, complete/partial variants, local preview URLs and the public parameterized-card integrity boundary. Cards are shareable presentation, not independent proof of a transaction.
 
+
+## Wallet-added safety assertions
+
+New reclaim reviews use the bounded Lighthouse policy documented in [docs/reclaim.md](docs/reclaim.md). Both client and server preserve all withdrawal instructions and their account privileges. Only the reviewed read-only assertion subset and bounded compute-unit increases are permitted. The review discloses a maximum network fee of 25,000 lamports per transaction. Wallets must return signed transactions for validation and signed simulation before RentBack submits them. Historical receipts keep their original policy. No legacy wallet dependency is introduced.

@@ -45,6 +45,19 @@ export function compareReclaimMessages(preparedBytes: ReadonlyUint8Array, return
       );
     }
     if (prepared.instructionCount !== returned.instructionCount) differences.push(`instruction count changed (${prepared.instructionCount} to ${returned.instructionCount})`);
+    // Public program IDs and counts only. Do not expose raw instruction data or
+    // assume that an added program is safe merely because its name is familiar.
+    const preparedPrograms = new Set(prepared.instructions.map((instruction) => instruction.program));
+    const addedPrograms = new Map<string, number>();
+    for (const instruction of returned.instructions) {
+      if (!preparedPrograms.has(instruction.program)) {
+        addedPrograms.set(instruction.program, (addedPrograms.get(instruction.program) ?? 0) + 1);
+      }
+    }
+    if (addedPrograms.size) {
+      const summary = [...addedPrograms].slice(0, 2).map(([program, count]) => `${program} (${count})`).join(", ");
+      differences.push(`added programs: ${summary}${addedPrograms.size > 2 ? ", ..." : ""}`);
+    }
     const budgets = (m: typeof prepared) => m.instructions.filter((i) => i.program === COMPUTE_BUDGET_PROGRAM_ADDRESS);
     if (JSON.stringify(budgets(prepared)) !== JSON.stringify(budgets(returned))) {
       // Safe mobile diagnostics: no signatures, raw payloads or wallet addresses.

@@ -8,7 +8,7 @@ import {
   assertOwnerMatch, assertReviewReady, buildReclaimTransaction,
   type ReclaimReceipt, type ReclaimReview,
 } from "./reclaim";
-import { assertSignedMessageUnchanged } from "./reclaim-message";
+import { assertWalletReclaimMessage } from "./reclaim-wallet-policy";
 
 export async function reclaimRequest<T>(body: unknown): Promise<T> {
   const response = await fetch("/api/reclaim", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -35,6 +35,9 @@ export async function executeReviewedBatch(review: ReclaimReview, scannedWallet:
   const signer = connection.signer;
   if (signer.address !== connection.address) throw new Error("Signer changed. Review the connected account again.");
   const batch = review.batches[0];
+  if (batch.walletPolicy && !isTransactionModifyingSigner(signer) && !isTransactionPartialSigner(signer)) {
+    throw new Error("This wallet cannot return a signed transaction for safety checks. Choose a wallet that supports sign-only transactions.");
+  }
   const transaction = buildReclaimTransaction(batch.accounts, scannedWallet, batch, signer);
   assertIsTransactionWithinSizeLimit(transaction);
   let receipt: ReclaimReceipt = { owner: scannedWallet, batch, status: "pending" };
@@ -53,7 +56,7 @@ export async function executeReviewedBatch(review: ReclaimReview, scannedWallet:
       : { ...transaction, signatures: { ...transaction.signatures, ...(await signer.signTransactions([transaction]))[0] } };
     assertSameConnection();
     if (!signed) throw new Error("Wallet returned no signed transaction. Nothing was submitted by RentBack.");
-    assertSignedMessageUnchanged(transaction.messageBytes, signed.messageBytes);
+    assertWalletReclaimMessage(transaction.messageBytes, signed.messageBytes, batch);
     assertIsFullySignedTransaction(signed);
     assertIsTransactionWithinSizeLimit(signed);
     } catch (cause) {

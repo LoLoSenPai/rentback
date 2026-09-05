@@ -13,6 +13,7 @@ import { buildReclaimSuccess, confirmedReceipts, receiptLabel } from "@/lib/recl
 import { publicApiError } from "@/lib/api-safety";
 import { sharePayloadFromSuccess, sharePreviewPath } from "@/lib/share/reclaim-share";
 import { ShareActions } from "./share/reclaim/share-actions";
+import { WALLET_MAX_FEE_LAMPORTS } from "@/lib/solana/reclaim-wallet-policy";
 
 const primary = "min-h-11 rounded-xl bg-rent-accent px-5 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50";
 const secondary = "min-h-11 rounded-xl border border-rent-border px-4 py-2 text-sm text-slate-200 disabled:opacity-50";
@@ -141,6 +142,7 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
         <p className="text-xl font-semibold">Reclaim {sol(review.expectedLamports)}</p>
         <p className="text-sm text-slate-300">{review.eligibleAccounts} accounts / {review.batches.length} transactions</p>
         <p className="text-xs text-slate-400">Estimated network fees: {sol(review.feeLamports)}. RentBack fee: 0%.</p>
+        {review.batches.some((batch) => batch.walletPolicy) && <p className="text-xs text-slate-400">Your wallet may add read-only safety checks. Maximum network fee: {sol(WALLET_MAX_FEE_LAMPORTS.toString())} per transaction; {sol(review.batches.reduce((total, batch) => total + (batch.walletPolicy ? WALLET_MAX_FEE_LAMPORTS : decimalLamports(batch.feeLamports)), 0n).toString())} for this review. No extra RentBack fee.</p>}
         <p className="text-sm text-slate-200">Only excess SOL will move to your connected wallet. Tokens stay untouched and token accounts stay open.</p>
         <p className="text-xs text-slate-400">Mainnet / Destination: {shortWallet(owner)}. Each transaction needs your approval.</p>
         {review.batches.length === 0 ? <p className="text-sm">No excess remains after rechecking the accounts.</p> : expired ? <button type="button" className={secondary} disabled={busy} onClick={() => void run(() => prepare(remainingCandidates(review, receiptRef.current)))}>Refresh expired review</button> :
