@@ -9,9 +9,10 @@ import { decimalLamports, type ReclaimReceipt, type ReclaimReview } from "@/lib/
 import { executeReviewedBatch, hasUnresolvedReclaim, reclaimRequest, remainingCandidates } from "@/lib/solana/reclaim-client";
 import type { RentBackApiResult } from "@/lib/solana/scan";
 import { shortWallet } from "./wallet-control";
-import { buildReclaimSuccess, confirmedReceipts, receiptLabel, reclaimShareUrl } from "@/lib/reclaim-result";
+import { buildReclaimSuccess, confirmedReceipts, receiptLabel } from "@/lib/reclaim-result";
 import { publicApiError } from "@/lib/api-safety";
 import { sharePayloadFromSuccess, sharePreviewPath } from "@/lib/share/reclaim-share";
+import { ShareActions } from "./share/reclaim/share-actions";
 
 const primary = "min-h-11 rounded-xl bg-rent-accent px-5 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50";
 const secondary = "min-h-11 rounded-xl border border-rent-border px-4 py-2 text-sm text-slate-200 disabled:opacity-50";
@@ -126,8 +127,8 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
       <p className="text-sm text-slate-200">{success.processedAccounts} token accounts processed</p>
       <p className="text-sm text-slate-200">0% RentBack fee</p>
       <p className="text-xs text-slate-400">Confirmed amount before network fees. No current excess remains.</p>
-      <a className="inline-flex min-h-11 items-center text-sm text-rent-accent underline underline-offset-4" href={reclaimShareUrl(success)} target="_blank" rel="noopener noreferrer">Share on X</a>
-      <a className="ml-4 inline-flex min-h-11 items-center text-sm text-slate-300 underline underline-offset-4" href={sharePreviewPath(sharePayloadFromSuccess(success))} target="_blank" rel="noopener noreferrer">Preview share card</a>
+      <ShareActions data={sharePayloadFromSuccess(success)} />
+      <a className="inline-flex min-h-11 items-center text-sm text-slate-300 underline underline-offset-4" href={sharePreviewPath(sharePayloadFromSuccess(success))} target="_blank" rel="noopener noreferrer">Preview share card</a>
     </div>}
     {!success && state === "disconnected" && <><button type="button" className={primary} onClick={onConnect}>Connect wallet</button><p className="text-sm text-slate-400">Connect the scanned wallet to prepare the reclaim.</p></>}
     {!success && state === "mismatched" && <><p className="text-sm">This is not the wallet you scanned.</p><p className="break-words text-xs text-slate-400">Scanned: {shortWallet(owner)} / Connected: {shortWallet(connection!.account.address)}</p><button type="button" className={secondary} onClick={onConnect}>Connect scanned wallet</button></>}

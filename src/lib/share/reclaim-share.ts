@@ -111,10 +111,14 @@ export function parseShareSearchParams(params: URLSearchParams): ReclaimSharePay
 }
 export const sharePreviewPath = (data: ReclaimSharePayload) => `/share/reclaim?${shareSearchParams(data)}`;
 export const shareImagePath = (data: ReclaimSharePayload) => `/api/share/reclaim-image?${shareSearchParams(data)}`;
+export const shareDownloadPath = (data: ReclaimSharePayload) => `${shareImagePath(data)}&download=1`;
 export function shareText(input: ReclaimSharePayload): string {
   const data = validateSharePayload(input);
   return `Recovered ${formatShareSol(data.amountReclaimedSol, true)} SOL in excess rent with RentBack. ${data.hasRemainingExcess ? "More excess remains to reclaim." : "Old Solana token accounts had more SOL than they needed."}`;
 }
 export function shareOnXUrl(data: ReclaimSharePayload): string {
   return `https://x.com/intent/post?${new URLSearchParams({ text: shareText(data), url: `${SITE_URL}${sharePreviewPath(data)}` })}`;
+}
+export function sharePostText(data: ReclaimSharePayload): string {
+  return `${shareText(data)}\n\n${SITE_URL}`;
 }

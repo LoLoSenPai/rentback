@@ -2,7 +2,8 @@ import Image from "next/image";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { SITE_URL } from "@/lib/site";
-import { buildShareCardViewModel, parseShareSearchParams, shareImagePath, shareOnXUrl, sharePreviewPath, SHARE_SIZE } from "@/lib/share/reclaim-share";
+import { buildShareCardViewModel, parseShareSearchParams, shareImagePath, sharePreviewPath, SHARE_SIZE } from "@/lib/share/reclaim-share";
+import { ShareActions } from "./share-actions";
 
 type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
 async function resultFromParams(props: Props) {
@@ -30,11 +31,8 @@ export default async function ReclaimSharePage(props: Props) {
       <a href={SITE_URL} className="text-lg font-semibold text-rent-accent">RentBack</a>
       <h1 className="text-2xl font-semibold">{model.amount} SOL reclaimed</h1>
       <Image src={shareImagePath(data)} width={SHARE_SIZE.width} height={SHARE_SIZE.height} unoptimized priority alt={`${model.amount} SOL reclaimed. ${model.accounts} ${model.accountLabel}. ${model.trust}`} className="h-auto w-full rounded-2xl border border-rent-border" />
-      <div className="flex flex-wrap gap-3">
-        <a href={shareOnXUrl(data)} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center rounded-xl bg-rent-accent px-5 py-3 text-sm font-semibold text-slate-950">Share on X</a>
-        <a href={shareImagePath(data)} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center rounded-xl border border-rent-border px-5 py-3 text-sm">Open share image</a>
-        <a href={SITE_URL} className="inline-flex min-h-11 items-center px-3 text-sm text-rent-accent underline">Check your wallet</a>
-      </div>
+      <ShareActions data={data} />
+      <a href={SITE_URL} className="inline-flex min-h-11 items-center px-3 text-sm text-rent-accent underline">Check your wallet</a>
       <p className="text-xs leading-relaxed text-slate-400">User-shared result, not independent on-chain verification. Shared links are public and their parameters are editable. Network fees are separate from the 0% RentBack fee.</p>
       {!!data.confirmedSignatures?.length && <details className="text-sm text-slate-300"><summary className="cursor-pointer py-3">Transaction references</summary><ul className="space-y-3">{data.confirmedSignatures.map((signature, i) => <li key={signature}><a className="text-rent-accent underline" href={`https://explorer.solana.com/tx/${signature}`} target="_blank" rel="noopener noreferrer">View transaction {i + 1} on mainnet</a></li>)}</ul></details>}
     </div>
