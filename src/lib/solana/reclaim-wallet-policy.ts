@@ -6,12 +6,12 @@ import { assertSignedMessageUnchanged } from "./reclaim-message";
 import { RECLAIM_COMPUTE_CEILING, RECLAIM_COMPUTE_PRICE } from "./reclaim-budget";
 
 export const LIGHTHOUSE_PROGRAM = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
-export const RECLAIM_WALLET_POLICY = "lighthouse-assertions-v1" as const;
+export const RECLAIM_WALLET_POLICY = "lighthouse-assertions-v2" as const;
 // A bounded allowance, not a fixed account batch size. The planner reserves it
 // and the validator enforces it against the actual wallet-returned message.
-export const WALLET_MESSAGE_RESERVE_BYTES = 384;
+export const WALLET_MESSAGE_RESERVE_BYTES = 512;
 export const WALLET_MAX_FEE_LAMPORTS = 25_000n;
-export type ReclaimWalletPolicy = typeof RECLAIM_WALLET_POLICY;
+export type ReclaimWalletPolicy = typeof RECLAIM_WALLET_POLICY | "lighthouse-assertions-v1";
 type Policy = { walletPolicy?: ReclaimWalletPolicy };
 
 function reject(reason: string): never {
@@ -20,6 +20,8 @@ function reject(reason: string): never {
 
 export function walletMessageReserve(policy: Policy): number {
   if (policy.walletPolicy === undefined) return 0;
+  // Persisted v1 reviews and receipts retain their original size contract.
+  if (policy.walletPolicy === "lighthouse-assertions-v1") return 384;
   if (policy.walletPolicy !== RECLAIM_WALLET_POLICY) reject("unsupported wallet safety policy");
   return WALLET_MESSAGE_RESERVE_BYTES;
 }

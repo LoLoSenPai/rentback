@@ -18,7 +18,7 @@ MWA identity uses https://rentback.lololabs.xyz and the relative icon URI `rentb
 
 ## Versioned wallet safety policy
 
-New reviews and their persisted batches carry `walletPolicy: "lighthouse-assertions-v1"`. The shared validator is used on the client before submission, on the server before signed simulation/broadcast, and for confirmed receipt reconciliation. It never edits a signed message or removes wallet protections.
+New reviews and their persisted batches carry `walletPolicy: "lighthouse-assertions-v2"`. Persisted v1 reviews/receipts retain their original 384-byte allowance; v2 reserves 512 bytes. The shared validator is used on the client before submission, on the server before signed simulation/broadcast, and for confirmed receipt reconciliation. It never edits a signed message or removes wallet protections.
 
 Permitted wallet differences are limited to:
 
@@ -45,7 +45,7 @@ Guards may be interleaved without changing the relative withdrawal order, at mos
 
 The review displays estimated fees AND a maximum of 25,000 lamports (0.000025 SOL) per transaction, plus the aggregate maximum for the review. Priority fee is `ceil(CU limit * 100000 / 1000000)` using bigint. The validator enforces budget bounds; the server also checks the actual signed-message RPC fee estimate before broadcast and the actual confirmed metadata fee during reconciliation.
 
-The planner measures complete serialized transactions including the signature and both budget instructions, and reserves 384 additional bytes for wallet augmentation. This is an explicit maximum accepted message growth, not a fixed number of accounts per batch. Final wallet-returned messages must fit both that allowance and Solana's 1,232-byte limit. Assertion count/data limits also apply. Larger additions are rejected.
+The planner measures complete serialized transactions including the signature and both budget instructions, and reserves 512 additional bytes for wallet augmentation in v2. This is an explicit maximum accepted message growth, not a fixed number of accounts per batch. Final wallet-returned messages must fit both that allowance and Solana's 1,232-byte limit. Assertion count/data limits also apply. Larger additions are rejected. This allowance covers the captured multi-predicate assertion shapes in the regression fixtures, not every possible wallet addition. The captured Phantom response split a 15-account request into a 1,221-byte reclaim/guard transaction and a 337-byte guard-only transaction; RentBack does not authorize such an additional bundle. The response also reported UNKNOWN_ERROR / RELIABLE_SIMULATION_NOT_POSSIBLE, whose underlying cause is not proven by the size evidence. Real Phantom verification remains required.
 
 The offline 58-account mixed-program fixture packs as 15/15/15/13 accounts: prepared sizes 837/837/837/759 bytes; modeled assertions produce 1125/1125/1125/1015 bytes. Source/program distribution can change sizes. These are deterministic fixture measurements, not captured Phantom transactions.
 
