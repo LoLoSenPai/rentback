@@ -74,3 +74,9 @@ After deployment, a user-controlled Phantom production test is still required to
 - https://solana.com/docs/tokens/advanced/withdraw-excess-lamports
 - https://docs.solanamobile.com/get-started/web/apps
 - https://www.solanakit.com/docs/guides/setting-up-signers
+
+## Compute allowance for wallet assertions
+
+New preparation adds 3,000 CU for each permitted assertion slot (two per source plus destination) to the measured withdrawal budget, after its existing 10% margin and 10,000-CU floor. This is a conservative planning allowance, not a guarantee for arbitrary Phantom predicates. The total must remain within 200,000 CU; it is never silently clamped. The final message is simulated and its RPC fee estimated before review. Price and the 25,000-lamport maximum are unchanged.
+
+On 2026-09-07, a read-only mainnet diagnosis of the supplied 66-account wallet measured 5,494 CU for the first 15 withdrawals, but 16,346 CU with modeled read-only Lighthouse assertions. The previous 10,000-CU limit failed for that model. New preparation reserves 106,000 CU for that batch (15,600 lamports total estimated fee at a 5,000-lamport base fee). These assertions are a diagnostic model, not captured Phantom output; the red Phantom warning still requires a real user-controlled production retest. No assertions are added to RentBack's signing request by this change.

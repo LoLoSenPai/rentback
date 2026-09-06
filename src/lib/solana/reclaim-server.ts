@@ -12,7 +12,7 @@ import {
   type ReclaimAccount, type ReclaimAccountDto, type ReclaimBatchDto, type ReclaimReceipt, type ReclaimReview,
 } from "./reclaim";
 
-import { assertComputeBudget, computeBudgetFromSimulation } from "./reclaim-budget";
+import { assertComputeBudget, computeBudgetWithWalletReserve } from "./reclaim-budget";
 import { buildLegacyReceiptTransaction } from "./reclaim";
 import { assertWalletReclaimMessage, assertWalletFee, RECLAIM_WALLET_POLICY } from "./reclaim-wallet-policy";
 
@@ -73,7 +73,7 @@ export async function prepareReclaim(rpc: ReclaimRpc, owner: string, scannedWall
     const probe = buildReclaimTransaction(group, owner, lifetime);
     const measured = await rpc.simulateTransaction(getBase64EncodedWireTransaction(probe), { encoding: "base64", sigVerify: false, commitment: "confirmed" }).send();
     if (measured.value.err) throw new Error(`Reclaim simulation failed: ${rpcErrorText(measured.value.err)}. No signature was requested.`);
-    const computeBudget = computeBudgetFromSimulation(measured.value.unitsConsumed);
+    const computeBudget = computeBudgetWithWalletReserve(measured.value.unitsConsumed, group.length);
     const finalLifetime = { ...lifetime, computeBudget };
     const transaction = buildReclaimTransaction(group, owner, finalLifetime);
     const simulation = await rpc.simulateTransaction(getBase64EncodedWireTransaction(transaction), { encoding: "base64", sigVerify: false, commitment: "confirmed" }).send();

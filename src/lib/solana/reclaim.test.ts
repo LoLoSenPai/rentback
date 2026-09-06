@@ -82,7 +82,7 @@ describe("Phantom mutation regression and complete-message planning", () => {
     const prepared = await prepareReclaim(rpc, owner, owner);
     const b = prepared.batches[0];
     const final = buildReclaimTransaction(b.accounts, owner, b);
-    expect(b.computeBudget?.units).toBe(13580);
+    expect(b.computeBudget?.units).toBe(25580);
     expect(methods.simulateTransaction).toHaveBeenCalledTimes(2);
     expect(methods.simulateTransaction).toHaveBeenNthCalledWith(2, getBase64EncodedWireTransaction(final), { encoding: "base64", sigVerify: false, commitment: "confirmed" });
     expect(methods.getFeeForMessage).toHaveBeenCalledWith(getBase64Decoder().decode(final.messageBytes), { commitment: "confirmed" });
@@ -132,7 +132,7 @@ describe("Phantom mutation regression and complete-message planning", () => {
     expect(retry.expectedLamports).toBe("1102266");
     expect(history.reduce((sum, r) => sum + BigInt(r.actualLamports!), 0n)).toBe(9586831n);
     expect(9586831n + BigInt(retry.expectedLamports)).toBe(10689097n);
-    expect(retry.batches[0].computeBudget).toEqual({ units: 11000, microLamports: "100000" });
+    expect(retry.batches[0].computeBudget).toEqual({ units: 53000, microLamports: "100000" });
     const submit = vi.fn();
     const signer: TransactionModifyingSigner = { address: address(owner), modifyAndSignTransactions: vi.fn(async (txs: Parameters<TransactionModifyingSigner["modifyAndSignTransactions"]>[0]) => txs.map((tx) => ({ ...tx, signatures: { [owner]: new Uint8Array(64).fill(1) } }))) as unknown as TransactionModifyingSigner["modifyAndSignTransactions"] };
     await executeReviewedBatch(retry, owner, { getConnection: () => ({ address: owner, walletId: "Fixture", signer }), onReceipt: vi.fn(), submit });

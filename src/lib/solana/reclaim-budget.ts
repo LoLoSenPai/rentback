@@ -6,6 +6,10 @@ export const RECLAIM_COMPUTE_CEILING = 200_000;
 // policy, not a documented wallet minimum. Set it BEFORE planning, simulation
 // and review; never accept a wallet's post-signature fee edits automatically.
 export const RECLAIM_COMPUTE_PRICE = "100000";
+// Planning allowance, not a protocol guarantee. The wallet policy permits at
+// most two assertions per source/destination. Reserve compute before review,
+// rather than relying on the wallet to raise the withdrawal-only CU limit.
+export const WALLET_ASSERTION_COMPUTE_RESERVE = 3_000;
 // Fixed-width instructions are present during packing as well as simulation.
 export const PLANNING_COMPUTE_BUDGET: ReclaimComputeBudget = { units: RECLAIM_COMPUTE_CEILING, microLamports: RECLAIM_COMPUTE_PRICE };
 
@@ -27,4 +31,17 @@ export function computeBudgetFromSimulation(consumed: bigint | undefined): Recla
 export function buildComputeBudgetInstructions(budget: ReclaimComputeBudget) {
   assertComputeBudget(budget);
   return [getSetComputeUnitLimitInstruction({ units: budget.units }), getSetComputeUnitPriceInstruction({ microLamports: BigInt(budget.microLamports) })];
+}
+
+export function computeBudgetWithWalletReserve(consumed: bigint | undefined, accountCount: number): ReclaimComputeBudget {
+  if (!Number.isSafeInteger(accountCount) || accountCount < 1 || accountCount > 1000) {
+    throw new Error("Invalid reclaim account count for compute planning.");
+  }
+  const base = computeBudgetFromSimulation(consumed);
+  const reserve = 2n * (BigInt(accountCount) + 1n) * BigInt(WALLET_ASSERTION_COMPUTE_RESERVE);
+  const units = BigInt(base.units) + reserve;
+  if (units > BigInt(RECLAIM_COMPUTE_CEILING)) {
+    throw new Error("Reclaim plus wallet safety checks exceeds the conservative compute limit. No signature was requested.");
+  }
+  return { ...base, units: Number(units) }; // Bounded CU count, never lamports.
 }
