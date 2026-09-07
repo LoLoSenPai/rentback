@@ -84,33 +84,121 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
     await onRescan(owner);
     return next;
   }
+  async function checkReceipts(initialReceipts: ReclaimReceipt[], poll: boolean) {
+    let next = initialReceipts;
+
+    for (let attempt = 0; attempt < (poll ? 25 : 1); attempt++) {
+      next = await Promise.all(
+        next.map(async (receipt) => {
+          if (receipt.status !== "pending") return receipt;
+
+          const updated = await reclaimRequest<ReclaimReceipt>({
+            action: "status",
+            receipt,
+          });
+
+          saveReceipt(updated);
+          return updated;
+        }),
+      );
+
+      if (next.every((receipt) => receipt.status !== "pending")) break;
+
+      if (poll) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+
+    await onRescan(owner);
+    return next;
+  }
   async function reclaim() {
-    if (!historyReady || !review || hasUnresolvedReclaim(receiptRef.current, owner)) throw new Error("Refresh the review before continuing.");
+    if (
+      !historyReady ||
+      !review ||
+      hasUnresolvedReclaim(receiptRef.current, owner)
+    ) {
+      throw new Error("Refresh the review before continuing.");
+    }
+
     const reviewed = review;
-    const completed = receiptRef.current.filter((entry) => entry.owner === owner && entry.status === "confirmed").length;
-    setProgress(`Transaction ${completed + 1} of ${completed + reviewed.batches.length}: continue in your wallet`);
+
+    setProgress(
+      `Confirm ${reviewed.batches.length} transactions in your wallet`,
+    );
+
     try {
-      const receipt = await executeReviewedBatch(reviewed, owner, {
+      const batchReceipts = await executeReviewedBatch(reviewed, owner, {
         getConnection: () => {
           const current = walletClient.wallet.getState().connected;
-          return current ? { address: current.account.address, signer: current.signer, walletId: current.wallet.name } : null;
+
+          return current
+            ? {
+              address: current.account.address,
+              signer: current.signer,
+              walletId: current.wallet.name,
+            }
+            : null;
         },
+
         onReceipt: saveReceipt,
-        submit: (receipt, wire) => reclaimRequest({ action: "submit", owner, scannedWallet: owner, batch: receipt.batch, wire }),
+
+        submit: (receipt, wire) =>
+          reclaimRequest({
+            action: "submit",
+            owner,
+            scannedWallet: owner,
+            batch: receipt.batch,
+            wire,
+          }),
       });
-      setProgress(`Transaction ${completed + 1}: waiting for confirmation...`);
-      const confirmed = await checkReceipt(receipt, true);
+
+      setProgress(
+        `Waiting for ${batchReceipts.length} transaction confirmations...`,
+      );
+
+      const results = await checkReceipts(batchReceipts, true);
+
       setReview(null);
-      if (confirmed.status === "confirmed") {
-        const candidates = remainingCandidates(reviewed, receiptRef.current);
-        if (candidates.length && mounted.current) await prepare(candidates);
-      } else if (confirmed.status === "pending") throw new Error("Confirmation is still pending. Your transaction history is saved; check status before retrying.");
-      else throw new Error(confirmed.error ?? "Transaction did not complete. Refresh remaining excess to retry.");
+
+      const pending = results.filter(
+        (receipt) => receipt.status === "pending",
+      );
+
+      if (pending.length > 0) {
+        throw new Error(
+          `${pending.length} transaction${pending.length > 1 ? "s are" : " is"} still pending. Check transaction status before retrying.`,
+        );
+      }
+
+      const failed = results.filter(
+        (receipt) => receipt.status === "failed" || receipt.status === "expired",
+      );
+
+      if (failed.length > 0) {
+        const candidates = remainingCandidates(
+          reviewed,
+          receiptRef.current,
+        );
+
+        if (candidates.length && mounted.current) {
+          await prepare(candidates);
+        }
+
+        throw new Error(
+          `${failed.length} transaction${failed.length > 1 ? "s did" : " did"} not complete. The remaining excess can be retried.`,
+        );
+      }
     } catch (cause) {
       setReview(null);
-      // Refresh the public scan even on rejection or network failure. A wallet
-      // may have broadcast successfully before the response was lost.
-      try { await onRescan(owner); } catch { /* Keep the original failure and all receipts. */ }
+
+      // Some transactions may already have landed even if a response was lost.
+      try {
+        await onRescan(owner);
+      } catch {
+        // Keep the original error and saved receipts.
+      }
+
       throw cause;
     }
   }
@@ -144,9 +232,21 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
         <p className="text-xs text-slate-400">Estimated network fees: {sol(review.feeLamports)}. RentBack fee: 0%.</p>
         {review.batches.some((batch) => batch.walletPolicy) && <p className="text-xs text-slate-400">Your wallet may add read-only safety checks. Maximum network fee: {sol(WALLET_MAX_FEE_LAMPORTS.toString())} per transaction; {sol(review.batches.reduce((total, batch) => total + (batch.walletPolicy ? WALLET_MAX_FEE_LAMPORTS : decimalLamports(batch.feeLamports)), 0n).toString())} for this review. No extra RentBack fee.</p>}
         <p className="text-sm text-slate-200">Only excess SOL will move to your connected wallet. Tokens stay untouched and token accounts stay open.</p>
-        <p className="text-xs text-slate-400">Mainnet / Destination: {shortWallet(owner)}. Each transaction needs your approval.</p>
+        <p className="text-xs text-slate-400">
+          Mainnet / Destination: {shortWallet(owner)}.{" "}
+          {review.batches.length === 1
+            ? "1 transaction will be sent to your wallet."
+            : `${review.batches.length} transactions will be sent together in one wallet request.`}
+        </p>
         {review.batches.length === 0 ? <p className="text-sm">No excess remains after rechecking the accounts.</p> : expired ? <button type="button" className={secondary} disabled={busy} onClick={() => void run(() => prepare(remainingCandidates(review, receiptRef.current)))}>Refresh expired review</button> :
-          <button type="button" className={primary} disabled={busy || unresolved} onClick={() => void run(reclaim)}>Reclaim {sol(review.batches[0].expectedLamports)}{review.batches.length > 1 ? " / next transaction" : ""}</button>}
+          <button
+            type="button"
+            className={primary}
+            disabled={busy || unresolved}
+            onClick={() => void run(reclaim)}
+          >
+            Reclaim {sol(review.expectedLamports)}
+          </button>}
       </div>}
     </>}
     {progress && <p role="status" aria-live="polite" className="text-sm text-rent-accent">{progress}</p>}
