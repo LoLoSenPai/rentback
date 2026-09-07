@@ -1,4 +1,5 @@
-import {
+import { writeFileSync } from 'node:fs';
+const content = `import {
   assertIsFullySignedTransaction,
   assertIsTransactionWithinSizeLimit,
   getBase58Decoder,
@@ -387,3 +388,6 @@ export function remainingCandidates(
     .flatMap((batch) => batch.accounts.map((account) => account.address))
     .filter((candidate) => !completed.has(candidate));
 }
+`;
+writeFileSync("src/lib/solana/reclaim-client.ts", content);
+console.log("DONE");
