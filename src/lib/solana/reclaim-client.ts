@@ -9,6 +9,7 @@ import {
   isTransactionPartialSigner,
   isTransactionSendingSigner,
   getTransactionEncoder,
+  type ReadonlyUint8Array,
   type Transaction,
   type TransactionSigner,
 } from "@solana/kit";
@@ -88,13 +89,13 @@ function diagnosticLogContext(override?: number, selected?: number, total?: numb
   };
 }
 
-function readComputeLimitAndPrice(data: Readonly<Uint8Array> | undefined) {
+function readComputeLimitAndPrice(data: ReadonlyUint8Array | undefined) {
   if (!data || data.length !== 5) return null;
   const view = new DataView(Uint8Array.from(data).buffer);
   return new DataView(view.buffer).getUint32(1, true);
 }
 
-function readMicroLamports(data: Readonly<Uint8Array> | undefined) {
+function readMicroLamports(data: ReadonlyUint8Array | undefined) {
   if (!data || data.length !== 9) return null;
   const bytes = Uint8Array.from(data);
   return new DataView(bytes.buffer).getBigUint64(1, true).toString();
@@ -105,6 +106,9 @@ function buildSigningDiagnostics(transactions: readonly Transaction[]) {
     const message = getCompiledTransactionMessageDecoder().decode(
       transaction.messageBytes,
     );
+    if (message.version !== 0) {
+      throw new Error("Signing diagnostics only support v0 reclaim transactions.");
+    }
     const withdrawals = message.instructions.slice(2);
     const sourceAccounts = new Set<string>();
     let tokenInstructions = 0;
