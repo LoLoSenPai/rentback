@@ -14,6 +14,7 @@ import { publicApiError } from "@/lib/api-safety";
 import { sharePayloadFromSuccess, sharePreviewPath } from "@/lib/share/reclaim-share";
 import { ShareActions } from "./share/reclaim/share-actions";
 import { WALLET_MAX_FEE_LAMPORTS } from "@/lib/solana/reclaim-wallet-policy";
+import { parseReclaimDiagnostics, type ReclaimDiagnosticsMode } from "@/lib/solana/reclaim-diagnostics";
 
 const primary = "min-h-11 rounded-xl bg-rent-accent px-5 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50";
 const secondary = "min-h-11 rounded-xl border border-rent-border px-4 py-2 text-sm text-slate-200 disabled:opacity-50";
@@ -36,8 +37,13 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
   const [now, setNow] = useState(Date.now());
   const [progress, setProgress] = useState("");
   const [historyReady, setHistoryReady] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<ReclaimDiagnosticsMode | null>(null);
+  const [diagnosticResult, setDiagnosticResult] = useState("");
+  const diagnosticOptions = diagnostics?.mode === "diagnostic" ? diagnostics.options : undefined;
+  const diagnosticsBlocked = diagnostics === null || diagnostics.mode === "invalid";
   useEffect(() => {
     mounted.current = true;
+    setDiagnostics(parseReclaimDiagnostics(window.location.search));
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? "[]") as ReclaimReceipt[];
       if (Array.isArray(saved) && saved.length <= 1000 && saved.every((entry) => entry && typeof entry.owner === "string" && Array.isArray(entry.batch?.accounts) && ["pending", "confirmed", "failed", "expired"].includes(entry.status))) {
@@ -66,6 +72,8 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
     finally { busyRef.current = false; if (mounted.current) { setBusy(false); setProgress(""); } }
   }
   async function prepare(candidates?: string[]) {
+    if (diagnosticsBlocked) throw new Error("Invalid diagnostic URL. Use rbDiagSignLimit=1, 2 or 6.");
+    setDiagnosticResult("");
     if (!historyReady) throw new Error("Transaction history is unavailable. Check your wallet activity before retrying.");
     if (hasUnresolvedReclaim(receiptRef.current, owner)) throw new Error("A transaction is still unresolved. Check its status before retrying.");
     setProgress("Checking current accounts, rent and simulations...");
@@ -115,6 +123,7 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
   async function reclaim() {
     if (
       !historyReady ||
+      diagnosticsBlocked ||
       !review ||
       hasUnresolvedReclaim(receiptRef.current, owner)
     ) {
@@ -122,9 +131,12 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
     }
 
     const reviewed = review;
+    const selectedCount = diagnosticOptions ? Math.min(diagnosticOptions.signerTransactionLimit, reviewed.batches.length) : reviewed.batches.length;
 
     setProgress(
-      `Confirm ${reviewed.batches.length} transactions in your wallet`,
+      diagnosticOptions
+        ? `Diagnostic: ${selectedCount} transaction(s) in one wallet request. Nothing will be submitted.`
+        : `Confirm ${reviewed.batches.length} transactions in your wallet`,
     );
 
     try {
@@ -141,17 +153,25 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
             : null;
         },
 
-        onReceipt: saveReceipt,
+        onReceipt: diagnosticOptions ? () => {} : saveReceipt,
 
-        submit: (receipt, wire) =>
-          reclaimRequest({
+        submit: (receipt, wire) => {
+          if (diagnosticOptions) throw new Error("Submission is disabled in diagnostic mode.");
+          return reclaimRequest({
             action: "submit",
             owner,
             scannedWallet: owner,
             batch: receipt.batch,
             wire,
-          }),
-      });
+          });
+        },
+      }, diagnosticOptions);
+
+      if (diagnosticOptions) {
+        setReview(null);
+        setDiagnosticResult(`Diagnostic finished: ${batchReceipts.length} transaction(s) signed and checked locally. No transaction submitted. Scan and reclaim history unchanged.`);
+        return;
+      }
 
       setProgress(
         `Waiting for ${batchReceipts.length} transaction confirmations...`,
@@ -211,6 +231,13 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
   const attempts = history.filter((receipt) => receipt.status !== "confirmed");
 
   return <div className="mt-5 space-y-3 border-t border-rent-border pt-5">
+    {diagnostics?.mode === "invalid" && <p role="alert" className="text-sm text-amber-200">Invalid diagnostic URL. Use rbDiagSignLimit=1, 2 or 6, or remove the parameter. Reclaim is disabled.</p>}
+    {diagnosticOptions && <div role="status" className="space-y-1 rounded-xl border border-amber-400/40 p-3 text-sm text-amber-200">
+      <p>Diagnostic mode: up to {diagnosticOptions.signerTransactionLimit} transaction(s), no submission.</p>
+      <p>Signing is real if you approve. RentBack will not broadcast or save signed transactions. You can cancel in your wallet.</p>
+      {review && <p>{Math.min(diagnosticOptions.signerTransactionLimit, review.batches.length)} of {review.batches.length} transactions selected. Your wallet may show one confirmation for the whole request.</p>}
+    </div>}
+    {diagnosticResult && <p role="status" className="text-sm text-rent-accent">{diagnosticResult}</p>}
     {success && <div role="status" className="space-y-2 rounded-xl border border-rent-accent/30 bg-rent-accent/5 p-4">
       <h3 className="break-words text-2xl font-semibold text-rent-accent">{sol(success.reclaimedLamports)} reclaimed</h3>
       <p className="text-sm text-slate-200">{success.processedAccounts} token accounts processed</p>
@@ -224,7 +251,7 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
     {!success && state === "no-claimable" && <p className="text-sm text-slate-300">No excess SOL currently available to reclaim.</p>}
     {!success && state === "matching" && <>
       <p className="text-sm text-rent-accent">Connected to the scanned wallet.</p>
-      {!review && <button type="button" className={primary} disabled={busy || unresolved || !connection?.signer} onClick={() => void run(() => prepare())}>Review reclaim</button>}
+      {!review && <button type="button" className={primary} disabled={busy || unresolved || !connection?.signer || diagnosticsBlocked} onClick={() => void run(() => prepare())}>Review reclaim</button>}
       {!connection?.signer && <p className="text-sm text-slate-400">This account is read-only. Choose a wallet account that can authorize transactions.</p>}
       {review && <div className="space-y-3 rounded-xl border border-rent-border bg-rent-bg/70 p-4">
         <p className="text-xl font-semibold">Reclaim {sol(review.expectedLamports)}</p>
@@ -242,10 +269,10 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
           <button
             type="button"
             className={primary}
-            disabled={busy || unresolved}
+            disabled={busy || unresolved || diagnosticsBlocked}
             onClick={() => void run(reclaim)}
           >
-            Reclaim {sol(review.expectedLamports)}
+            {diagnosticOptions ? `Test ${Math.min(diagnosticOptions.signerTransactionLimit, review.batches.length)} transaction(s) - no submission` : `Reclaim ${sol(review.expectedLamports)}`}
           </button>}
       </div>}
     </>}

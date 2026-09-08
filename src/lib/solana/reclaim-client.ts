@@ -69,23 +69,24 @@ function selectedSignerBatchLimit(total: number, override?: number) {
   return clampLimit(DEV_SIGNER_BATCH_LIMIT, total);
 }
 
-function shouldLogDiagnostics(override?: number) {
-  return DEV_DIAGNOSTICS_ENABLED || typeof override === "number";
+function shouldLogDiagnostics(override?: number, noSubmit = false) {
+  return DEV_DIAGNOSTICS_ENABLED || typeof override === "number" || noSubmit;
 }
 
 function isDiagnosticNoSubmitEnabled(
   totalTransactions: number,
   override?: number,
+  noSubmit = false,
 ) {
-  return totalTransactions > 0 && typeof override === "number";
+  return totalTransactions > 0 && (noSubmit || typeof override === "number");
 }
 
-function diagnosticLogContext(override?: number, selected?: number, total?: number) {
+function diagnosticLogContext(override?: number, selected?: number, total?: number, noSubmit = false) {
   return {
     source: override ? "query" : DEV_DIAGNOSTICS_ENABLED ? "local" : "none",
     selectedTransactions: selected,
     totalTransactions: total,
-    noSubmit: isDiagnosticNoSubmitEnabled(total ?? 0, override),
+    noSubmit: isDiagnosticNoSubmitEnabled(total ?? 0, override, noSubmit),
   };
 }
 
@@ -146,11 +147,11 @@ function logSigningDiagnostics(
   options?: ExecuteReclaimDiagnostics,
 ) {
   const limit = options?.signerTransactionLimit;
-  if (!shouldLogDiagnostics(limit)) return;
+  if (!shouldLogDiagnostics(limit, options?.noSubmit)) return;
   const diagnostics = buildSigningDiagnostics(transactions);
   const selectedDiagnostics = diagnostics.slice(0, selected);
   console.info("[RentBack][Diag] signing request summary", {
-    ...diagnosticLogContext(limit, selected, transactions.length),
+    ...diagnosticLogContext(limit, selected, transactions.length, options?.noSubmit),
     diagnostics: selectedDiagnostics,
   });
 }
@@ -188,7 +189,7 @@ export async function executeReviewedBatch(
   }
 
   if (
-    isDiagnosticNoSubmitEnabled(review.batches.length, diagnostics.signerTransactionLimit) &&
+    isDiagnosticNoSubmitEnabled(review.batches.length, diagnostics.signerTransactionLimit, diagnostics.noSubmit) &&
     isTransactionSendingSigner(signer)
   ) {
     throw new Error(
@@ -296,6 +297,18 @@ export async function executeReviewedBatch(
         };
       });
 
+      if (isDiagnosticNoSubmitEnabled(transactions.length, diagnostics.signerTransactionLimit, diagnostics.noSubmit)) {
+        // Never persist a signed transaction identifier or reach submit in a
+        // diagnostic run. The panel keeps these attempts out of receipt history.
+        const skipped = receipts.map((receipt) => ({
+          ...receipt,
+          status: "failed" as const,
+          error: "Diagnostic mode: signatures were validated locally but not submitted.",
+        }));
+        for (const receipt of skipped) deps.onReceipt(receipt);
+        return skipped;
+      }
+
       receipts = receipts.map((receipt, index) => ({
         ...receipt,
         signature: validated[index].signature,
@@ -314,17 +327,6 @@ export async function executeReviewedBatch(
 
     for (let index = 0; index < validated.length; index++) {
       try {
-        if (isDiagnosticNoSubmitEnabled(transactions.length, diagnostics.signerTransactionLimit)) {
-          const skipped = receipts.map((receipt) => ({
-            ...receipt,
-            status: "failed" as const,
-            error: "Diagnostic mode: signatures were validated locally but not submitted.",
-          }));
-          for (const receipt of skipped) {
-            deps.onReceipt(receipt);
-          }
-          return skipped;
-        }
         await deps.submit(receipts[index], validated[index].wire);
       } catch (cause) {
         for (
