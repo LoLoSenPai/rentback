@@ -253,8 +253,7 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
   return <div className="mt-5 space-y-3 border-t border-rent-border pt-5">
     {diagnostics?.mode === "invalid" && <p role="alert" className="text-sm text-amber-200">Invalid diagnostic URL. Use rbDiagSignLimit=1, 2 or 6, or remove the parameter. Reclaim is disabled.</p>}
     {diagnosticOptions && <div role="status" className="space-y-1 rounded-xl border border-amber-400/40 p-3 text-sm text-amber-200">
-      <p>Wallet preview test: up to {diagnosticOptions.signerTransactionLimit} transaction(s). No reclaim will be executed by RentBack.</p>
-      <p>You can cancel in your wallet after checking the preview. If you approve, the signatures are real, but RentBack will discard them without sending them to the network.</p>
+      <p>Diagnostic: up to {diagnosticOptions.signerTransactionLimit} transactions. Signing enabled; network submission disabled.</p>
       {review && <p>{Math.min(diagnosticOptions.signerTransactionLimit, review.batches.length)} of {review.batches.length} transactions selected. Your wallet may show one confirmation for the whole request.</p>}
     </div>}
     {diagnosticResult && <p role="status" className="text-sm text-rent-accent">{diagnosticResult}</p>}
@@ -268,7 +267,7 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
         link.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }}>Download diagnostic JSON ({diagnosticExport.selectedTransactions} transactions)</button>
-      <p className="text-xs text-slate-400">Captured before the wallet request, available even after cancellation. Includes public wallet/account addresses and unsigned messages. No signatures, cookies or access tokens. Does not include Phantom's private simulation response.</p>
+      <p className="text-xs text-slate-400">Unsigned messages and public account addresses. Phantom simulation response not included.</p>
     </div>}
     {success && <div role="status" className="space-y-2 rounded-xl border border-rent-accent/30 bg-rent-accent/5 p-4">
       <h3 className="break-words text-2xl font-semibold text-rent-accent">{sol(success.reclaimedLamports)} reclaimed</h3>
