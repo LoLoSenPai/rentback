@@ -2,6 +2,7 @@ import {
   assertIsFullySignedTransaction,
   assertIsTransactionWithinSizeLimit,
   getBase58Decoder,
+  getBase64Decoder,
   getBase64EncodedWireTransaction,
   getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
@@ -47,6 +48,18 @@ export type ExecuteReclaimDependencies = {
   getConnection: () => ReclaimConnection | null;
   submit: (receipt: ReclaimReceipt, wire: string) => Promise<unknown>;
   onReceipt: (receipt: ReclaimReceipt) => void;
+  onSigningDiagnostics?: (report: ReclaimSigningDiagnosticReport) => void;
+};
+
+export type ReclaimSigningDiagnosticReport = {
+  schemaVersion: 1;
+  capturedAt: string;
+  capturePoint: "before-wallet-signing";
+  network: "solana:mainnet";
+  noSubmit: boolean;
+  selectedTransactions: number;
+  totalTransactions: number;
+  transactions: ReturnType<typeof buildSigningDiagnostics>;
 };
 
 export type ExecuteReclaimDiagnostics = {
@@ -65,7 +78,7 @@ function clampLimit(limit: number, total: number) {
 function selectedSignerBatchLimit(total: number, override?: number) {
   if (typeof override === "number" && override > 0)
     return clampLimit(override, total);
-  if (!DEV_DIAGNOSTICS_ENABLED || DEV_SIGNER_BATCH_LIMIT <= 0) return total;
+  if (!DEV_DIAGNOSTICS_ENABLED || DEV_SIGNER_BATCH_LIMIT <= 0) return 1;
   return clampLimit(DEV_SIGNER_BATCH_LIMIT, total);
 }
 
@@ -137,6 +150,19 @@ function buildSigningDiagnostics(transactions: readonly Transaction[]) {
       tokenInstructions,
       token2022Instructions,
       otherInstructions,
+      // Message bytes have no signatures. Include a normalized representation
+      // so local/production comparisons can ignore only the recent blockhash.
+      messageBase64: getBase64Decoder().decode(transaction.messageBytes),
+      version: message.version,
+      header: message.header,
+      recentBlockhash: message.lifetimeToken,
+      staticAccounts: [...message.staticAccounts],
+      compiledInstructions: message.instructions.map((instruction) => ({
+        programAddressIndex: instruction.programAddressIndex,
+        accountIndices: [...(instruction.accountIndices ?? [])],
+        dataBase64: getBase64Decoder().decode(instruction.data ?? new Uint8Array()),
+      })),
+      addressTableLookups: message.addressTableLookups ?? [],
     };
   });
 }
@@ -190,7 +216,9 @@ export async function executeReviewedBatch(
 
   if (
     isDiagnosticNoSubmitEnabled(review.batches.length, diagnostics.signerTransactionLimit, diagnostics.noSubmit) &&
-    isTransactionSendingSigner(signer)
+    isTransactionSendingSigner(signer) &&
+    !isTransactionModifyingSigner(signer) &&
+    !isTransactionPartialSigner(signer)
   ) {
     throw new Error(
       "Diagnostic mode does not support wallets that broadcast during signing. Use a wallet with sign-only tx APIs.",
@@ -215,6 +243,18 @@ export async function executeReviewedBatch(
   const selectedBatches = review.batches.slice(0, selectedTransactionCount);
 
   logSigningDiagnostics(transactions, selectedTransactionCount, diagnostics);
+  if (isDiagnosticNoSubmitEnabled(transactions.length, diagnostics.signerTransactionLimit, diagnostics.noSubmit)) {
+    deps.onSigningDiagnostics?.({
+      schemaVersion: 1,
+      capturedAt: new Date().toISOString(),
+      capturePoint: "before-wallet-signing",
+      network: "solana:mainnet",
+      noSubmit: true,
+      selectedTransactions: selectedTransactionCount,
+      totalTransactions: transactions.length,
+      transactions: buildSigningDiagnostics(selectedTransactions),
+    });
+  }
 
   if (
     diagnostics.signerTransactionLimit &&

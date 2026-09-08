@@ -6,7 +6,7 @@ import { walletClient } from "@/lib/solana/wallet-client";
 import { formatLamportsAsSol } from "@/lib/rent-calculations";
 import { getWalletOwnershipState } from "@/lib/solana/wallet-ownership";
 import { decimalLamports, type ReclaimReceipt, type ReclaimReview } from "@/lib/solana/reclaim";
-import { executeReviewedBatch, hasUnresolvedReclaim, reclaimRequest, remainingCandidates } from "@/lib/solana/reclaim-client";
+import { executeReviewedBatch, hasUnresolvedReclaim, reclaimRequest, remainingCandidates, type ReclaimSigningDiagnosticReport } from "@/lib/solana/reclaim-client";
 import type { RentBackApiResult } from "@/lib/solana/scan";
 import { shortWallet } from "./wallet-control";
 import { buildReclaimSuccess, confirmedReceipts, receiptLabel } from "@/lib/reclaim-result";
@@ -39,6 +39,7 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
   const [historyReady, setHistoryReady] = useState(false);
   const [diagnostics, setDiagnostics] = useState<ReclaimDiagnosticsMode | null>(null);
   const [diagnosticResult, setDiagnosticResult] = useState("");
+  const [diagnosticExport, setDiagnosticExport] = useState<(ReclaimSigningDiagnosticReport & { origin: string }) | null>(null);
   const diagnosticOptions = diagnostics?.mode === "diagnostic" ? diagnostics.options : undefined;
   const diagnosticsBlocked = diagnostics === null || diagnostics.mode === "invalid";
   useEffect(() => {
@@ -130,13 +131,23 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
       throw new Error("Refresh the review before continuing.");
     }
 
-    const reviewed = review;
+    const fullReview = review;
+    if (diagnosticOptions) setDiagnosticExport(null);
+    const firstBatch = review.batches[0];
+    if (!firstBatch) throw new Error("No excess remains after rechecking the accounts.");
+    const reviewed = diagnosticOptions ? review : {
+      ...review,
+      batches: [firstBatch],
+      eligibleAccounts: firstBatch.accounts.length,
+      expectedLamports: firstBatch.expectedLamports,
+      feeLamports: firstBatch.feeLamports,
+    };
     const selectedCount = diagnosticOptions ? Math.min(diagnosticOptions.signerTransactionLimit, reviewed.batches.length) : reviewed.batches.length;
 
     setProgress(
       diagnosticOptions
         ? `Diagnostic: ${selectedCount} transaction(s) in one wallet request. Nothing will be submitted.`
-        : `Confirm ${reviewed.batches.length} transactions in your wallet`,
+        : `Confirm the next transaction in your wallet (${fullReview.batches.length} remaining)`,
     );
 
     try {
@@ -154,6 +165,9 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
         },
 
         onReceipt: diagnosticOptions ? () => {} : saveReceipt,
+        onSigningDiagnostics: diagnosticOptions ? (report) => {
+          if (mounted.current) setDiagnosticExport({ ...report, origin: window.location.origin });
+        } : undefined,
 
         submit: (receipt, wire) => {
           if (diagnosticOptions) throw new Error("Submission is disabled in diagnostic mode.");
@@ -197,7 +211,7 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
 
       if (failed.length > 0) {
         const candidates = remainingCandidates(
-          reviewed,
+          fullReview,
           receiptRef.current,
         );
 
@@ -208,6 +222,12 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
         throw new Error(
           `${failed.length} transaction${failed.length > 1 ? "s did" : " did"} not complete. The remaining excess can be retried.`,
         );
+      }
+      // A normal click authorizes only one transaction. Re-fetch accounts/rent
+      // before offering the next click; never open the next wallet prompt here.
+      const remaining = remainingCandidates(fullReview, receiptRef.current);
+      if (remaining.length && mounted.current && activeOwner.current === owner) {
+        await prepare(remaining);
       }
     } catch (cause) {
       setReview(null);
@@ -233,11 +253,23 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
   return <div className="mt-5 space-y-3 border-t border-rent-border pt-5">
     {diagnostics?.mode === "invalid" && <p role="alert" className="text-sm text-amber-200">Invalid diagnostic URL. Use rbDiagSignLimit=1, 2 or 6, or remove the parameter. Reclaim is disabled.</p>}
     {diagnosticOptions && <div role="status" className="space-y-1 rounded-xl border border-amber-400/40 p-3 text-sm text-amber-200">
-      <p>Diagnostic mode: up to {diagnosticOptions.signerTransactionLimit} transaction(s), no submission.</p>
-      <p>Signing is real if you approve. RentBack will not broadcast or save signed transactions. You can cancel in your wallet.</p>
+      <p>Wallet preview test: up to {diagnosticOptions.signerTransactionLimit} transaction(s). No reclaim will be executed by RentBack.</p>
+      <p>You can cancel in your wallet after checking the preview. If you approve, the signatures are real, but RentBack will discard them without sending them to the network.</p>
       {review && <p>{Math.min(diagnosticOptions.signerTransactionLimit, review.batches.length)} of {review.batches.length} transactions selected. Your wallet may show one confirmation for the whole request.</p>}
     </div>}
     {diagnosticResult && <p role="status" className="text-sm text-rent-accent">{diagnosticResult}</p>}
+    {diagnosticOptions && diagnosticExport && <div className="space-y-1">
+      <button type="button" className={secondary} onClick={() => {
+        const blob = new Blob([JSON.stringify(diagnosticExport, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `rentback-diagnostic-${new URL(diagnosticExport.origin).hostname}-${diagnosticExport.selectedTransactions}-${Date.now()}.json`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }}>Download diagnostic JSON ({diagnosticExport.selectedTransactions} transactions)</button>
+      <p className="text-xs text-slate-400">Captured before the wallet request, available even after cancellation. Includes public wallet/account addresses and unsigned messages. No signatures, cookies or access tokens. Does not include Phantom's private simulation response.</p>
+    </div>}
     {success && <div role="status" className="space-y-2 rounded-xl border border-rent-accent/30 bg-rent-accent/5 p-4">
       <h3 className="break-words text-2xl font-semibold text-rent-accent">{sol(success.reclaimedLamports)} reclaimed</h3>
       <p className="text-sm text-slate-200">{success.processedAccounts} token accounts processed</p>
@@ -261,9 +293,9 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
         <p className="text-sm text-slate-200">Only excess SOL will move to your connected wallet. Tokens stay untouched and token accounts stay open.</p>
         <p className="text-xs text-slate-400">
           Mainnet / Destination: {shortWallet(owner)}.{" "}
-          {review.batches.length === 1
-            ? "1 transaction will be sent to your wallet."
-            : `${review.batches.length} transactions will be sent together in one wallet request.`}
+          {diagnosticOptions
+            ? `${Math.min(diagnosticOptions.signerTransactionLimit, review.batches.length)} transactions will be presented together for this test only. Nothing will be submitted.`
+            : "One transaction per approval. After confirmation, remaining accounts are checked again before your next click."}
         </p>
         {review.batches.length === 0 ? <p className="text-sm">No excess remains after rechecking the accounts.</p> : expired ? <button type="button" className={secondary} disabled={busy} onClick={() => void run(() => prepare(remainingCandidates(review, receiptRef.current)))}>Refresh expired review</button> :
           <button
@@ -272,7 +304,7 @@ export function ReclaimPanel({ scan, onConnect, onRescan }: { scan: RentBackApiR
             disabled={busy || unresolved || diagnosticsBlocked}
             onClick={() => void run(reclaim)}
           >
-            {diagnosticOptions ? `Test ${Math.min(diagnosticOptions.signerTransactionLimit, review.batches.length)} transaction(s) - no submission` : `Reclaim ${sol(review.expectedLamports)}`}
+            {diagnosticOptions ? `Preview ${Math.min(diagnosticOptions.signerTransactionLimit, review.batches.length)} transaction(s) - test only` : `Reclaim ${sol(review.batches[0].expectedLamports)} / next transaction`}
           </button>}
       </div>}
     </>}

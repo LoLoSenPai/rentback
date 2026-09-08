@@ -24,6 +24,18 @@ function fixture() {
 }
 
 describe("explicit non-broadcast diagnostic mode", () => {
+  it("uses sign-only when a wallet also exposes a sending capability", async () => {
+    const f = fixture();
+    const connection = f.deps.getConnection();
+    const send = vi.fn();
+    const signer = { ...connection.signer, signAndSendTransactions: send };
+    const deps = { ...f.deps, getConnection: () => ({ ...connection, signer }) };
+    await executeReviewedBatch(f.review, owner, deps, { signerTransactionLimit: 6, noSubmit: true });
+    expect(f.sign).toHaveBeenCalledTimes(1);
+    expect(f.sign.mock.calls[0][0]).toHaveLength(6);
+    expect(send).not.toHaveBeenCalled();
+    expect(f.submit).not.toHaveBeenCalled();
+  });
   it.each([1, 2, 6])("selects %i transactions in one request without submitting or emitting signature identifiers", async limit => {
     const mode = parseReclaimDiagnostics(`?rbDiagSignLimit=${limit}`);
     expect(mode.mode).toBe("diagnostic");
@@ -40,15 +52,15 @@ describe("explicit non-broadcast diagnostic mode", () => {
   it("honors noSubmit independently of the optional transaction limit", async () => {
     const f = fixture();
     await executeReviewedBatch(f.review, owner, f.deps, { noSubmit: true });
-    expect(f.sign.mock.calls[0][0]).toHaveLength(6);
+    expect(f.sign.mock.calls[0][0]).toHaveLength(1);
     expect(f.submit).not.toHaveBeenCalled();
   });
-  it("retains the ordinary grouped-signing flow without diagnostic options", async () => {
+  it("requests and submits only the next transaction without diagnostic options", async () => {
     const f = fixture();
     await executeReviewedBatch(f.review, owner, f.deps);
     expect(f.sign).toHaveBeenCalledTimes(1);
-    expect(f.sign.mock.calls[0][0]).toHaveLength(6);
-    expect(f.submit).toHaveBeenCalledTimes(6);
+    expect(f.sign.mock.calls[0][0]).toHaveLength(1);
+    expect(f.submit).toHaveBeenCalledTimes(1);
   });
   it("leaves normal URLs unchanged", () => {
     expect(parseReclaimDiagnostics("")).toEqual({ mode: "normal" });
